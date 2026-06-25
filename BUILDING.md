@@ -46,7 +46,7 @@ The package is written to:
 
 Example:
 
-`dist/Atlas-1.1.5.pkg`
+`dist/Atlas-1.2.0.pkg`
 
 If a package with that name already exists, the script adds a timestamp.
 

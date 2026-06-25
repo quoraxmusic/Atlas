@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Atlas VERSION 1.1.5 LANGUAGES C CXX OBJC OBJCXX)
+project(Atlas VERSION 1.2.0 LANGUAGES C CXX OBJC OBJCXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -67,5 +67,4 @@ target_link_libraries(Atlas PRIVATE
   juce::juce_dsp
   juce::juce_gui_extra
   PUBLIC
-  juce::juce_recommended_config_flags
-  juce::juce_recommended_lto_flags)
+  juce::juce_recommended_config_flags)

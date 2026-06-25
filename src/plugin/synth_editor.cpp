@@ -1261,6 +1261,27 @@ namespace {
     return id.endsWith("transpose_quantize");
   }
 
+  bool isTransposeQuantizeModeParameter(const String& id) {
+    return id.endsWith("_transpose_quantize_mode");
+  }
+
+  bool isEffectChoiceParameter(const String& id, const String& suffix) {
+    return id == suffix || id.endsWith("_" + suffix);
+  }
+
+  String transposeQuantizeModeTitleForParameter(const String& id) {
+    if (id.startsWith("osc_")) {
+      const String number = id.fromFirstOccurrenceOf("osc_", false, false)
+                            .upToFirstOccurrenceOf("_", false, false);
+      return "Oscillator " + number + " transpose quantize mode";
+    }
+    if (id == "sample_transpose_quantize_mode")
+      return "Sample transpose quantize mode";
+    if (id == "granular_transpose_quantize_mode")
+      return "Granular transpose quantize mode";
+    return "Transpose quantize mode";
+  }
+
   struct QuantizeScaleChoice {
     const char* name;
     int mask;
@@ -1636,7 +1657,11 @@ namespace {
           explicit ValueInterface(Button& buttonToWrap) : button_(buttonToWrap) { }
 
           bool isReadOnly() const override { return true; }
-          String getCurrentValueAsString() const override { return button_.getToggleState() ? "On" : "Off"; }
+          String getCurrentValueAsString() const override {
+            const char* key = button_.getToggleState() ? "accessibleOnText" : "accessibleOffText";
+            const auto custom_text = button_.getProperties()[key].toString();
+            return custom_text.isNotEmpty() ? custom_text : (button_.getToggleState() ? "On" : "Off");
+          }
           void setValueAsString(const String&) override { }
 
         private:
@@ -1848,10 +1873,15 @@ class AccessibleParameterRow : public Component {
     explicit AccessibleParameterRow(AudioProcessorParameter& parameter, const String& accessibleName = {},
                                     std::function<String(double)> textFromValue = {},
                                     double maxNormalizedValue = 1.0,
-                                    double minNormalizedValue = 0.0) :
+                                    double minNormalizedValue = 0.0,
+                                    const String& accessibleOffText = {},
+                                    const String& accessibleOnText = {},
+                                    const String& accessibleDescription = {},
+                                    bool forceSliderControl = false) :
         parameter_(parameter), text_from_value_(std::move(textFromValue)),
         min_normalized_value_(jlimit(0.0, 1.0, minNormalizedValue)),
         max_normalized_value_(jlimit(min_normalized_value_, 1.0, maxNormalizedValue)) {
+      use_toggle_control_ = parameter_.isBoolean() && !forceSliderControl;
       const auto* bridge = dynamic_cast<ValueBridge*>(&parameter_);
       const String parameter_id = bridge != nullptr ? bridge->getParameterId() : String();
       const auto name = parameter_.getName(128);
@@ -1862,10 +1892,15 @@ class AccessibleParameterRow : public Component {
       label_.setColour(Label::textColourId, Colours::white);
       addAndMakeVisible(label_);
 
-      if (parameter_.isBoolean()) {
+      if (use_toggle_control_) {
         toggle_.setButtonText(accessible_name);
         toggle_.setTitle(accessible_name);
-        toggle_.setDescription("Turn " + accessible_name + " on or off");
+        toggle_.setDescription(accessibleDescription.isNotEmpty() ? accessibleDescription
+                                                                  : "Turn " + accessible_name + " on or off");
+        if (accessibleOffText.isNotEmpty())
+          toggle_.getProperties().set("accessibleOffText", accessibleOffText);
+        if (accessibleOnText.isNotEmpty())
+          toggle_.getProperties().set("accessibleOnText", accessibleOnText);
         toggle_.setHelpText("Press Space to toggle. Press Shift M for modulation, Shift L for MIDI learn, or Shift C to clear MIDI learn.");
         toggle_.setWantsKeyboardFocus(true);
         toggle_.onClick = [this] {
@@ -1882,8 +1917,9 @@ class AccessibleParameterRow : public Component {
         slider_.setRange(min_normalized_value_, max_normalized_value_,
                          steps > 1 && steps < 10000 ? 1.0 / (steps - 1) : 0.0);
         slider_.setTitle(accessible_name);
-        slider_.setDescription(random_rate ? "Adjust free-running random modulation period"
-                                           : "Adjust " + accessible_name);
+        slider_.setDescription(accessibleDescription.isNotEmpty() ? accessibleDescription
+                                                                  : (random_rate ? "Adjust free-running random modulation period"
+                                                                                 : "Adjust " + accessible_name));
         slider_.setHelpText(random_rate ? "In free mode this controls how long each random cycle lasts. In synced mode use Tempo."
                                         : "Use arrows for changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default, Shift M for modulation, Shift L for MIDI learn, and Shift C to clear MIDI learn");
         slider_.setWantsKeyboardFocus(true);
@@ -1933,7 +1969,7 @@ class AccessibleParameterRow : public Component {
 
     void refresh() {
       ScopedValueSetter<bool> guard(updating_, true);
-      if (parameter_.isBoolean())
+      if (use_toggle_control_)
         toggle_.setToggleState(parameter_.getValue() >= 0.5f, dontSendNotification);
       else
         slider_.setValue(jlimit(min_normalized_value_, max_normalized_value_,
@@ -1941,7 +1977,7 @@ class AccessibleParameterRow : public Component {
     }
 
     Component* focusableControl() {
-      return parameter_.isBoolean() ? static_cast<Component*>(&toggle_) : static_cast<Component*>(&slider_);
+      return use_toggle_control_ ? static_cast<Component*>(&toggle_) : static_cast<Component*>(&slider_);
     }
 
     String parameterId() const {
@@ -1957,7 +1993,7 @@ class AccessibleParameterRow : public Component {
     void resized() override {
       auto bounds = getLocalBounds().reduced(8, 4);
       label_.setBounds(bounds.removeFromLeft(jmin(240, bounds.getWidth() / 3)));
-      if (parameter_.isBoolean())
+      if (use_toggle_control_)
         toggle_.setBounds(bounds);
       else
         slider_.setBounds(bounds);
@@ -1987,6 +2023,7 @@ class AccessibleParameterRow : public Component {
     std::function<bool(const String&, const KeyPress&, Component&)> extra_command_callback_;
     double min_normalized_value_ = 0.0;
     double max_normalized_value_ = 1.0;
+    bool use_toggle_control_ = false;
     bool updating_ = false;
 
     void updateAccessibleCommand() {
@@ -3005,8 +3042,9 @@ std::unique_ptr<AccessibleParameterRow> SynthEditor::createAccessibleParameterRo
   if (bridge == nullptr)
     return std::make_unique<AccessibleParameterRow>(parameter);
 
-  const String suffix = filterSuffixForParameter(sectionName, bridge->getParameterId());
-  if (isTransposeQuantizeParameter(bridge->getParameterId())) {
+  const String parameter_id = bridge->getParameterId();
+  const String suffix = filterSuffixForParameter(sectionName, parameter_id);
+  if (isTransposeQuantizeParameter(parameter_id)) {
     return std::make_unique<AccessibleParameterRow>(parameter, "Transpose quantize",
                                                     [bridge](double value) {
                                                       const int quantize = static_cast<int>(std::round(
@@ -3015,7 +3053,82 @@ std::unique_ptr<AccessibleParameterRow> SynthEditor::createAccessibleParameterRo
                                                     });
   }
 
-  const String parameter_id = bridge->getParameterId();
+  if (isTransposeQuantizeModeParameter(parameter_id)) {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, transposeQuantizeModeTitleForParameter(parameter_id),
+        [](double value) { return value >= 0.5 ? "Global scale" : "Local scale"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether transpose quantize uses this source's scale or the global scale", true);
+  }
+
+  if (isEffectChoiceParameter(parameter_id, "eq_low_mode")) {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "EQ low band mode",
+        [](double value) { return value >= 0.5 ? "High pass" : "Shelf"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether the low EQ band is a shelf or high pass filter", true);
+  }
+
+  if (isEffectChoiceParameter(parameter_id, "eq_band_mode")) {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "EQ middle band mode",
+        [](double value) { return value >= 0.5 ? "Notch" : "Shelf"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether the middle EQ band is a shelf or notch filter", true);
+  }
+
+  if (isEffectChoiceParameter(parameter_id, "eq_high_mode")) {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "EQ high band mode",
+        [](double value) { return value >= 0.5 ? "Low pass" : "Shelf"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether the high EQ band is a shelf or low pass filter", true);
+  }
+
+  if (isEffectChoiceParameter(parameter_id, "utility_filter_slope")) {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Utility filter slope",
+        [](double value) { return value >= 0.5 ? "24 dB per octave" : "12 dB per octave"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose the slope for the utility low cut and high cut filters", true);
+  }
+
+  if (parameter_id == "granular_mode") {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Granular playback mode",
+        [](double value) { return value >= 0.5 ? "Manual position" : "Play-through"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether the granular oscillator plays through the sample or uses the position control", true);
+  }
+
+  if (parameter_id == "granular_midi_density") {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Granular MIDI density control",
+        [](double value) { return value >= 0.5 ? "MIDI note rate" : "Density knob"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose whether grain density follows the density knob or the incoming MIDI note rate", true);
+  }
+
+  if (parameter_id == "filter_1_filter_input") {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Filter 1 input from Filter 2",
+        [](double value) {
+          return value >= 0.5 ? "Filter 2 feeds Filter 1" : "Filter 1 does not receive Filter 2";
+        }, 1.0, 0.0,
+        String(), String(),
+        "Route Filter 2 into Filter 1 for serial filter routing", true);
+  }
+
+  if (parameter_id == "filter_2_filter_input") {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Filter 2 input from Filter 1",
+        [](double value) {
+          return value >= 0.5 ? "Filter 1 feeds Filter 2" : "Filter 2 does not receive Filter 1";
+        }, 1.0, 0.0,
+        String(), String(),
+        "Route Filter 1 into Filter 2 for serial filter routing", true);
+  }
+
   const int macro_index = macroIndexForControlId(parameter_id);
   if (macro_index >= 0) {
     const String macro_name = synth_.getMacroName(macro_index);
@@ -3056,7 +3169,9 @@ std::unique_ptr<AccessibleParameterRow> SynthEditor::createAccessibleParameterRo
   if (parameter_id == "filter_1_destination" || parameter_id == "filter_2_destination") {
     const double min_normalized = bridge->convertToPluginValue(static_cast<float>(vital::constants::kEffects));
     const double max_normalized = bridge->convertToPluginValue(static_cast<float>(vital::constants::kBus3));
-    return std::make_unique<AccessibleParameterRow>(parameter, "Destination",
+    const String filter_name = parameter_id == "filter_1_destination" ? "Filter 1 destination"
+                                                                      : "Filter 2 destination";
+    return std::make_unique<AccessibleParameterRow>(parameter, filter_name,
                                                     [bridge](double value) {
                                                       const int destination = static_cast<int>(std::round(
                                                           bridge->convertToEngineValue(static_cast<float>(value))));
