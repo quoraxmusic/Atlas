@@ -9,6 +9,7 @@ xcshareddata
 *.xcworkspace
 build
 build-*
+!installer/build-pkg.sh
 dist/
 dist.zip
 .clang_complete
