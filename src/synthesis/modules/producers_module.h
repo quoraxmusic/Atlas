@@ -33,6 +33,7 @@ namespace vital {
         kVelocity,
         kActiveVoices,
         kNoteCount,
+        kNotePressed,
         kNumInputs
       };
 

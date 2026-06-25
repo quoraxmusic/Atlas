@@ -45,6 +45,7 @@ namespace {
   constexpr const char* kEffectsChainSection = "Chain and routing";
   constexpr const char* kAllBanks = "All banks";
   constexpr const char* kAllCategories = "All categories";
+  constexpr int kBrowserRescanMenuId = 0x3fff0001;
 
   void postPluginAnnouncement(const String&, AccessibilityHandler::AnnouncementPriority) { }
 
@@ -726,7 +727,7 @@ namespace {
 
     if (id.startsWith("sample_")) {
       const String suffix = id.fromFirstOccurrenceOf("sample_", false, false);
-      static const std::array<const char*, 26> sample_order = {{
+      static const std::array<const char*, 27> sample_order = {{
         "on",
         "destination",
         "playback_mode",
@@ -734,6 +735,7 @@ namespace {
         "bounce",
         "random_phase",
         "keytrack",
+        "root_key",
         "start",
         "end",
         "loop_start",
@@ -767,11 +769,12 @@ namespace {
 
     if (id.startsWith("granular_")) {
       const String suffix = id.fromFirstOccurrenceOf("granular_", false, false);
-      static const std::array<const char*, 35> granular_order = {{
+      static const std::array<const char*, 36> granular_order = {{
         "on",
         "destination",
         "mode",
         "keytrack",
+        "root_key",
         "grain_count",
         "density",
         "midi_density",
@@ -1229,6 +1232,14 @@ namespace {
 
   String percentString(float value) {
     return String(roundToInt(jlimit(0.0f, 1.0f, value) * 100.0f)) + "%";
+  }
+
+  String midiRootKeyText(double value) {
+    static const std::array<const char*, 12> names = {{
+      "C", "C sharp", "D", "E flat", "E", "F", "F sharp", "G", "A flat", "A", "B flat", "B"
+    }};
+    const int midi_note = jlimit(0, 127, roundToInt(value));
+    return String(names[midi_note % vital::kNotesPerOctave]) + ", MIDI " + String(midi_note);
   }
 
   int shiftedDigitIndex(const KeyPress& key) {
@@ -2749,6 +2760,10 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   setResizeLimits(680, 480, 1400, 1000);
   setSize(900, 700);
   startTimerHz(20);
+  Timer::callAfterDelay(250, [safe_this = Component::SafePointer<SynthEditor>(this)] {
+    if (safe_this != nullptr)
+      safe_this->primeBrowserFileCaches();
+  });
 }
 
 void SynthEditor::paint(Graphics& graphics) {
@@ -3107,6 +3122,15 @@ std::unique_ptr<AccessibleParameterRow> SynthEditor::createAccessibleParameterRo
         [](double value) { return value >= 0.5 ? "MIDI note rate" : "Density knob"; }, 1.0, 0.0,
         String(), String(),
         "Choose whether grain density follows the density knob or the incoming MIDI note rate", true);
+  }
+
+  if (parameter_id == "sample_root_key" || parameter_id == "granular_root_key") {
+    const String title = parameter_id == "sample_root_key" ? "Sample root key" : "Granular root key";
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, title,
+        [](double value) { return midiRootKeyText(value); }, 1.0, 0.0,
+        String(), String(),
+        "Set the MIDI note that plays the loaded sample at its original pitch", true);
   }
 
   if (parameter_id == "filter_1_filter_input") {
@@ -7122,18 +7146,59 @@ void SynthEditor::removeWavetableFundamental(int oscillator, int frame, bool all
   clearWavetableHarmonic(oscillator, frame, allFrames, 1);
 }
 
+void SynthEditor::refreshWavetableBrowserCache() {
+  const auto roots = browserRootsWithAdditionalFolders(LoadSave::kWavetableFolderName,
+                                                       LoadSave::kAdditionalWavetableFoldersName);
+  refreshBrowserFileCache(cached_wavetable_browser_files_, roots, vital::kWavetableExtensionsList);
+  wavetable_browser_cache_valid_ = true;
+}
+
+void SynthEditor::refreshSampleBrowserCache() {
+  const auto roots = browserRootsWithAdditionalFolders(LoadSave::kSampleFolderName,
+                                                       LoadSave::kAdditionalSampleFoldersName);
+  refreshBrowserFileCache(cached_sample_browser_files_, roots, vital::kSampleExtensionsList);
+  sample_browser_cache_valid_ = true;
+}
+
+void SynthEditor::primeBrowserFileCaches() {
+  if (wavetable_browser_cache_valid_ && sample_browser_cache_valid_)
+    return;
+
+  const auto wavetable_roots = browserRootsWithAdditionalFolders(LoadSave::kWavetableFolderName,
+                                                                 LoadSave::kAdditionalWavetableFoldersName);
+  const auto sample_roots = browserRootsWithAdditionalFolders(LoadSave::kSampleFolderName,
+                                                              LoadSave::kAdditionalSampleFoldersName);
+  Thread::launch([safe_this = Component::SafePointer<SynthEditor>(this),
+                  wavetable_roots, sample_roots] {
+    std::vector<File> wavetable_files;
+    std::vector<File> sample_files;
+    refreshBrowserFileCache(wavetable_files, wavetable_roots, vital::kWavetableExtensionsList);
+    refreshBrowserFileCache(sample_files, sample_roots, vital::kSampleExtensionsList);
+    MessageManager::callAsync([safe_this,
+                               wavetable_files = std::move(wavetable_files),
+                               sample_files = std::move(sample_files)]() mutable {
+      if (safe_this == nullptr)
+        return;
+      if (!safe_this->wavetable_browser_cache_valid_) {
+        safe_this->cached_wavetable_browser_files_ = std::move(wavetable_files);
+        safe_this->wavetable_browser_cache_valid_ = true;
+      }
+      if (!safe_this->sample_browser_cache_valid_) {
+        safe_this->cached_sample_browser_files_ = std::move(sample_files);
+        safe_this->sample_browser_cache_valid_ = true;
+      }
+    });
+  });
+}
+
 void SynthEditor::loadShiftedWavetable(int oscillator, int direction) {
   if (!isPositiveAndBelow(oscillator, vital::kNumOscillators))
     return;
 
   auto* creator = synth_.getWavetableCreator(oscillator);
   const File current_file(creator != nullptr ? creator->getLastFileLoaded() : std::string());
-  const auto roots = browserRootsWithAdditionalFolders(LoadSave::kWavetableFolderName,
-                                                       LoadSave::kAdditionalWavetableFoldersName);
-  if (!wavetable_browser_cache_valid_) {
-    refreshBrowserFileCache(cached_wavetable_browser_files_, roots, vital::kWavetableExtensionsList);
-    wavetable_browser_cache_valid_ = true;
-  }
+  if (!wavetable_browser_cache_valid_)
+    refreshWavetableBrowserCache();
 
   File wavetable_file = shiftedBrowserFile(cached_wavetable_browser_files_, current_file, direction);
   if (wavetable_file.existsAsFile()) {
@@ -7152,16 +7217,24 @@ void SynthEditor::showWavetableBrowserMenu(int oscillator, Component& target) {
 
   const auto roots = browserRootsWithAdditionalFolders(LoadSave::kWavetableFolderName,
                                                        LoadSave::kAdditionalWavetableFoldersName);
-  if (!wavetable_browser_cache_valid_) {
-    refreshBrowserFileCache(cached_wavetable_browser_files_, roots, vital::kWavetableExtensionsList);
-    wavetable_browser_cache_valid_ = true;
-  }
+  if (!wavetable_browser_cache_valid_)
+    refreshWavetableBrowserCache();
 
   auto choices = std::make_shared<std::vector<File>>();
   PopupMenu menu = createFileBrowserMenu(roots, LoadSave::kWavetableFolderName,
                                          cached_wavetable_browser_files_, choices);
+  menu.addSeparator();
+  menu.addItem(kBrowserRescanMenuId, "Rescan wavetable folders");
+  Component::SafePointer<Component> target_pointer(&target);
   menu.showMenuAsync(PopupMenu::Options().withTargetComponent(&target),
-                     [this, oscillator, choices](int result) {
+                     [this, oscillator, choices, target_pointer](int result) {
+    if (result == kBrowserRescanMenuId) {
+      cached_wavetable_browser_files_.clear();
+      wavetable_browser_cache_valid_ = false;
+      if (target_pointer != nullptr)
+        showWavetableBrowserMenu(oscillator, *target_pointer);
+      return;
+    }
     if (!isPositiveAndBelow(result - 1, static_cast<int>(choices->size())))
       return;
 
@@ -7232,12 +7305,8 @@ void SynthEditor::loadSampleFile(const File& file, bool granular) {
 void SynthEditor::loadShiftedSample(int direction, bool granular) {
   auto* sample = granular ? synth_.getGranularSample() : synth_.getSample();
   const File current_file(sample != nullptr ? sample->getLastBrowsedFile() : std::string());
-  const auto roots = browserRootsWithAdditionalFolders(LoadSave::kSampleFolderName,
-                                                       LoadSave::kAdditionalSampleFoldersName);
-  if (!sample_browser_cache_valid_) {
-    refreshBrowserFileCache(cached_sample_browser_files_, roots, vital::kSampleExtensionsList);
-    sample_browser_cache_valid_ = true;
-  }
+  if (!sample_browser_cache_valid_)
+    refreshSampleBrowserCache();
 
   File sample_file = shiftedBrowserFile(cached_sample_browser_files_, current_file, direction);
   if (sample_file.existsAsFile()) {
@@ -7252,16 +7321,24 @@ void SynthEditor::loadShiftedSample(int direction, bool granular) {
 void SynthEditor::showSampleBrowserMenu(Component& target, bool granular) {
   const auto roots = browserRootsWithAdditionalFolders(LoadSave::kSampleFolderName,
                                                        LoadSave::kAdditionalSampleFoldersName);
-  if (!sample_browser_cache_valid_) {
-    refreshBrowserFileCache(cached_sample_browser_files_, roots, vital::kSampleExtensionsList);
-    sample_browser_cache_valid_ = true;
-  }
+  if (!sample_browser_cache_valid_)
+    refreshSampleBrowserCache();
 
   auto choices = std::make_shared<std::vector<File>>();
   PopupMenu menu = createFileBrowserMenu(roots, LoadSave::kSampleFolderName,
                                          cached_sample_browser_files_, choices);
+  menu.addSeparator();
+  menu.addItem(kBrowserRescanMenuId, "Rescan sample folders");
+  Component::SafePointer<Component> target_pointer(&target);
   menu.showMenuAsync(PopupMenu::Options().withTargetComponent(&target),
-                     [this, choices, granular](int result) {
+                     [this, choices, granular, target_pointer](int result) {
+    if (result == kBrowserRescanMenuId) {
+      cached_sample_browser_files_.clear();
+      sample_browser_cache_valid_ = false;
+      if (target_pointer != nullptr)
+        showSampleBrowserMenu(*target_pointer, granular);
+      return;
+    }
     if (!isPositiveAndBelow(result - 1, static_cast<int>(choices->size())))
       return;
 

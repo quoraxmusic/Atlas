@@ -272,6 +272,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     bool handleMacroShortcut(const String& parameterId, const KeyPress& key, Component& target);
     bool isMacroBipolar(int macroIndex) const;
     void setMacroBipolar(int macroIndex, bool bipolar);
+    void refreshWavetableBrowserCache();
+    void refreshSampleBrowserCache();
+    void primeBrowserFileCaches();
 
     SynthPlugin& synth_;
     Label title_;

@@ -1415,7 +1415,6 @@ namespace vital {
     poly_mask reset_mask = getResetMask(kReset);
     poly_int trigger_offset = input(kReset)->source->trigger_offset;
     poly_mask retrigger_mask = getResetMask(kRetrigger) & ~reset_mask;
-
     current_center_amplitude = utils::maskLoad(current_center_amplitude, center_amplitude_, reset_mask);
     current_detuned_amplitude = utils::maskLoad(current_detuned_amplitude, detuned_amplitude_, reset_mask);
 
@@ -1488,6 +1487,29 @@ namespace vital {
       clearOutputBufferForReset(reset_mask, kReset, kRaw);
 
     processBlend(num_samples, reset_mask);
+
+    poly_mask overlap_reset_mask = reset_mask & poly_float::greaterThan(input(kNotePressed)->at(0), 1.0f);
+    if (overlap_reset_mask.anyMask()) {
+      static constexpr mono_float kMonoOverlapFadeSeconds = 0.001f;
+      const int fade_samples = std::max(1, static_cast<int>(kMonoOverlapFadeSeconds * getSampleRate()));
+      poly_int trigger_offset = input(kReset)->source->trigger_offset;
+      poly_float* raw = output(kRaw)->buffer;
+      poly_float* levelled = output(kLevelled)->buffer;
+
+      for (int lane = 0; lane < poly_float::kSize; ++lane) {
+        if (!overlap_reset_mask[lane])
+          continue;
+
+        const int trigger = std::max(0, static_cast<int>(trigger_offset[lane]));
+        const int start = std::min(num_samples, trigger);
+        const int end = std::min(num_samples, start + fade_samples);
+        for (int i = start; i < end; ++i) {
+          mono_float fade = (i - start + 1.0f) / fade_samples;
+          raw[i].set(lane, raw[i][lane] * fade);
+          levelled[i].set(lane, levelled[i][lane] * fade);
+        }
+      }
+    }
   }
 
   template<poly_int(*phaseDistort)(poly_int, poly_float, poly_int, const poly_float*, int),

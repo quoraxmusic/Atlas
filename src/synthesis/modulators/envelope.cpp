@@ -51,8 +51,7 @@ namespace vital {
     poly_int remaining_samples = utils::maskLoad(num_samples, triggered_remaining, trigger_mask);
     start_value_ = utils::maskLoad(start_value_, value_, trigger_mask);
     poly_mask released_retrigger_mask = trigger_mask & note_on_mask &
-                                        (poly_float::equal(previous_state, kVoiceOff) |
-                                         poly_float::equal(previous_state, kVoiceKill));
+                                        poly_float::equal(previous_state, kVoiceKill);
     start_value_ = utils::maskLoad(start_value_, 0.0f, released_retrigger_mask);
 
     poly_mask delay_mask = poly_float::equal(poly_state_, kVoiceIdle);
@@ -196,8 +195,7 @@ namespace vital {
 
       start_value_ = utils::maskLoad(start_value_, value_, triggering);
       poly_mask released_retrigger_mask = triggering & note_on_mask &
-                                          (poly_float::equal(previous_state, kVoiceOff) |
-                                           poly_float::equal(previous_state, kVoiceKill));
+                                          poly_float::equal(previous_state, kVoiceKill);
       start_value_ = utils::maskLoad(start_value_, 0.0f, released_retrigger_mask);
       attack_power_ = utils::maskLoad(attack_power_, attack_power_end, triggering);
       decay_power_ = utils::maskLoad(decay_power_, decay_power_end, triggering);

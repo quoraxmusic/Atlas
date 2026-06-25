@@ -29,6 +29,7 @@ namespace vital {
         kRetrigger,
         kMidi,
         kActiveVoices,
+        kNotePressed,
         kNumInputs
       };
 
@@ -64,4 +65,3 @@ namespace vital {
       JUCE_LEAK_DETECTOR(OscillatorModule)
   };
 } // namespace vital
-

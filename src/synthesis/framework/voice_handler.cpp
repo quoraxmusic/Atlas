@@ -62,6 +62,7 @@ namespace vital {
   } // namespace
 
   Voice::Voice(AggregateVoice* parent) : voice_index_(0), voice_mask_(0), event_sample_(-1),
+      adjacent_same_note_retrigger_(false),
       aftertouch_sample_(-1), aftertouch_(0.0f), slide_sample_(-1), slide_(0.0f), parent_(parent) {
     state_.event = kVoiceOff;
     state_.midi_note = 0;
@@ -142,8 +143,8 @@ namespace vital {
             velocity_.trigger(mask, voice->state().velocity, offset);
             channel_.trigger(mask, voice->state().channel, offset);
 
-            if (voice->last_key_state() == Voice::kDead || voice->last_key_state() == Voice::kReleased ||
-                (!legato_ && voice->last_key_state() == Voice::kHeld))
+            if (voice->last_key_state() == Voice::kDead ||
+                (voice->last_key_state() == Voice::kReleased && !voice->adjacentSameNoteRetrigger()))
               reset_.trigger(mask, kVoiceOn, offset);
           }
           else if (voice->state().event == kVoiceOff)
@@ -690,7 +691,7 @@ namespace vital {
         else {
           if (polyphony_ <= pressed_notes_.size() && voice->state().event != kVoiceKill) {
             Voice* new_voice = voice;
-            if (voice_override_ == kKill) {
+            if (voice_override_ == kKill && !legato_) {
               voice->kill();
               new_voice = grabVoice();
             }
@@ -713,9 +714,9 @@ namespace vital {
             total_notes_++;
             new_voice->activate(old_note, tuned_note, voice->state().velocity,
                                 last_played_note_, pressed_notes_.size() + 1, total_notes_, sample, old_channel);
-            voice->setLocalPitchBend(pitch_wheel_values_[channel]);
-            voice->setAftertouch(pressure_values_[channel]);
-            voice->setSlide(slide_values_[channel]);
+            new_voice->setLocalPitchBend(pitch_wheel_values_[old_channel]);
+            new_voice->setAftertouch(pressure_values_[old_channel]);
+            new_voice->setSlide(slide_values_[old_channel]);
           }
           else {
             voice->deactivate(sample);

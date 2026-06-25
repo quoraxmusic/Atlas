@@ -80,10 +80,18 @@ namespace vital {
     return value < 0.0f ? value + length : value;
   }
 
+  mono_float GranularSource::inputValueAt(int input_index, int frame, int lane) const {
+    const auto* source = input(input_index)->source;
+    const int index = source->buffer_size > frame ? frame : 0;
+    return source->buffer[index][lane];
+  }
+
   void GranularSource::resetLane(int lane, mono_float start) {
     lanes_[lane].reset();
-    lanes_[lane].playhead = start;
-    phase_.set(lane, start);
+    mono_float manual_position = input(kPosition)->at(0)[lane];
+    bool manual = input(kMode)->at(0)[0] >= 0.5f;
+    lanes_[lane].playhead = manual ? manual_position : 0.0;
+    phase_.set(lane, lanes_[lane].playhead);
   }
 
   mono_float GranularSource::readSampleAt(int lane, double position, double increment) const {
@@ -104,7 +112,8 @@ namespace vital {
     return utils::interpolate(buffer[first], buffer[second], blend);
   }
 
-  void GranularSource::spawnGrain(int lane, mono_float start, mono_float end, mono_float pitch_ratio) {
+  void GranularSource::spawnGrain(int lane, int frame, mono_float start, mono_float end,
+                                  mono_float normalized_position, mono_float pitch_ratio) {
     LaneState& state = lanes_[lane];
     int maximum_active = utils::iclamp(static_cast<int>(input(kGrainCount)->at(0)[0] + 0.5f), 1, kMaxGrains);
     int active = 0;
@@ -127,31 +136,42 @@ namespace vital {
 
     const mono_float region = std::max<mono_float>(Sample::kMinSize, end - start);
     mono_float random_bipolar = random_generator_.next() * 2.0f - 1.0f;
-    mono_float lfo = std::sin(state.modulation_phase * kPi * 2.0);
-    bool manual = input(kMode)->at(0)[0] >= 0.5f;
-    mono_float normalized = manual ? input(kPosition)->at(0)[0] : static_cast<mono_float>(state.playhead);
-    normalized += lfo * input(kPositionMod)->at(0)[0] * 0.005f;
-    normalized += random_bipolar * input(kRandomPosition)->at(0)[0] * 0.005f;
+    mono_float normalized = normalized_position;
+    normalized += random_bipolar * inputValueAt(kRandomPosition, frame, lane) * 0.005f;
     normalized = wrapPosition(normalized, 1.0f);
 
-    mono_float semitones = random_bipolar * input(kRandomPitch)->at(0)[0];
-    if (random_generator_.next() * 100.0f < input(kIntervalChance)->at(0)[0])
-      semitones += input(kInterval)->at(0)[0];
+    mono_float semitones = random_bipolar * inputValueAt(kRandomPitch, frame, lane);
+    if (random_generator_.next() * 100.0f < inputValueAt(kIntervalChance, frame, lane))
+      semitones += inputValueAt(kInterval, frame, lane);
 
     int direction = utils::iclamp(static_cast<int>(input(kDirection)->at(0)[0] + 0.5f), 0, 2);
     bool reverse = direction == 1 || (direction == 2 && random_generator_.next() >= 0.5f);
     mono_float grain_pitch = pitch_ratio * utils::centsToRatio(semitones * kCentsPerNote);
-    mono_float volume_variation = random_generator_.next() * input(kRandomVolume)->at(0)[0] * 0.01f;
-    mono_float random_pan = random_bipolar * input(kRandomPan)->at(0)[0] * 0.01f;
+    mono_float source_increment = grain_pitch * sample_->activeSampleRate() / getSampleRate() *
+                                  (1 << Sample::kUpsampleTimes) * (reverse ? -1.0 : 1.0);
+    int grain_length = std::max(1, static_cast<int>(inputValueAt(kGrainSize, frame, lane) *
+                                                    0.001f * getSampleRate()));
+    mono_float source_span = std::abs(source_increment) * std::max(0, grain_length - 1);
+    mono_float safe_position = start + normalized * region;
+    if (source_span < region - 1.0f) {
+      if (reverse)
+        safe_position = std::max<mono_float>(safe_position, start + source_span);
+      else
+        safe_position = std::min<mono_float>(safe_position, start + region - 1.0f - source_span);
+    }
+
+    mono_float volume_variation = random_generator_.next() * inputValueAt(kRandomVolume, frame, lane) * 0.01f;
+    mono_float random_pan = random_bipolar * inputValueAt(kRandomPan, frame, lane) * 0.01f;
     mono_float pan_gain = (lane % 2) ? std::sqrt(0.5f * (1.0f + random_pan)) :
                                       std::sqrt(0.5f * (1.0f - random_pan));
 
     target->active = true;
-    target->source_position = start + normalized * region;
-    target->source_increment = grain_pitch * sample_->activeSampleRate() / getSampleRate() *
-                               (1 << Sample::kUpsampleTimes) * (reverse ? -1.0 : 1.0);
+    target->source_position = safe_position;
+    target->source_increment = source_increment;
+    target->region_start = start;
+    target->region_length = region;
     target->age = 0;
-    target->length = std::max(1, static_cast<int>(input(kGrainSize)->at(0)[0] * 0.001f * getSampleRate()));
+    target->length = grain_length;
     target->gain = (1.0f - volume_variation) * pan_gain;
   }
 
@@ -164,7 +184,7 @@ namespace vital {
 
     poly_float input_midi = 0.0f;
     if (input(kKeytrack)->at(0)[0])
-      input_midi = input(kMidi)->at(0) - kMidiTrackCenter;
+      input_midi = input(kMidi)->at(0) - input(kRootKey)->at(0);
 
     int transpose_quantize = static_cast<int>(input(kTransposeQuantize)->at(0)[0]);
     int quantize_scale = static_cast<int>(input(kTransposeQuantizeScale)->at(0)[0]);
@@ -190,7 +210,7 @@ namespace vital {
     sample_start = utils::floor(utils::clamp(sample_start, 0.0f, audio_end - minimum_region));
     sample_end = utils::floor(utils::clamp(sample_end, sample_start + minimum_region, audio_end));
 
-    poly_mask reset_mask = getResetMask(kReset) | getResetMask(kVoiceEvent);
+    poly_mask reset_mask = getResetMask(kReset);
     for (int lane = 0; lane < poly_float::kSize; ++lane) {
       if (reset_mask[lane])
         resetLane(lane, sample_start[lane]);
@@ -209,22 +229,29 @@ namespace vital {
         mono_float start = sample_start[lane];
         mono_float end = sample_end[lane];
         mono_float region = std::max<mono_float>(Sample::kMinSize, end - start);
+        bool manual = input(kMode)->at(0)[0] >= 0.5f;
         mono_float density = input(kMidiDensity)->at(0)[0] >= 0.5f ?
                              utils::midiNoteToFrequency(input(kMidi)->at(0)[lane]) :
-                             input(kDensity)->at(0)[lane];
+                             inputValueAt(kDensity, frame, lane);
         mono_float grain_period = getSampleRate() / std::max<mono_float>(1.0f, density);
+        mono_float lfo = std::sin(state.modulation_phase * kPi * 2.0);
+        mono_float target_position = manual ? inputValueAt(kPosition, frame, lane) :
+                                             static_cast<mono_float>(state.playhead);
+        target_position += lfo * inputValueAt(kPositionMod, frame, lane) * 0.005f;
+        target_position = wrapPosition(target_position, 1.0f);
 
         if (state.samples_until_next_grain <= 0.0) {
-          spawnGrain(lane, start, end, pitch_ratio[lane]);
+          spawnGrain(lane, frame, start, end, target_position, pitch_ratio[lane]);
           state.samples_until_next_grain += grain_period;
         }
 
         state.samples_until_next_grain -= 1.0;
-        state.modulation_phase += input(kPositionModRate)->at(0)[lane] / getSampleRate();
+        state.modulation_phase += inputValueAt(kPositionModRate, frame, lane) / getSampleRate();
         state.modulation_phase -= std::floor(state.modulation_phase);
 
-        if (input(kMode)->at(0)[0] < 0.5f) {
-          state.playhead += input(kSpeed)->at(0)[lane] * sample_->activeSampleRate() / getSampleRate() / region;
+        if (!manual) {
+          state.playhead += inputValueAt(kSpeed, frame, lane) * sample_->activeSampleRate() /
+                            getSampleRate() / region;
           state.playhead -= std::floor(state.playhead);
         }
 
@@ -235,15 +262,18 @@ namespace vital {
 
           mono_float phase = static_cast<mono_float>(grain.age) / std::max(1, grain.length);
           mono_float window = 0.5f - 0.5f * std::cos(phase * kPi * 2.0f);
-          lane_output += readSampleAt(lane, grain.source_position, grain.source_increment) * window * grain.gain;
+          mono_float sample = readSampleAt(lane, grain.source_position, grain.source_increment);
+          lane_output += sample * window * grain.gain;
 
-          grain.source_position = start + wrapPosition(grain.source_position + grain.source_increment - start, region);
-          if (++grain.age >= grain.length)
+          grain.source_position += grain.source_increment;
+          const double region_end = grain.region_start + grain.region_length;
+          if (++grain.age >= grain.length || grain.source_position < grain.region_start ||
+              grain.source_position >= region_end)
             grain.active = false;
         }
 
         frame_output.set(lane, lane_output);
-        phase_.set(lane, utils::clamp(static_cast<mono_float>(state.playhead), 0.0f, 1.0f));
+        phase_.set(lane, utils::clamp(target_position, 0.0f, 1.0f));
       }
       raw_output[frame] = frame_output;
       VITAL_ASSERT(utils::isContained(raw_output[frame]));

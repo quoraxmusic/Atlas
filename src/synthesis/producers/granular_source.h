@@ -34,6 +34,7 @@ namespace vital {
         kVoiceEvent,
         kMidi,
         kKeytrack,
+        kRootKey,
         kLevel,
         kTranspose,
         kTransposeQuantize,
@@ -84,6 +85,8 @@ namespace vital {
         bool active = false;
         double source_position = 0.0;
         double source_increment = 1.0;
+        double region_start = 0.0;
+        double region_length = 1.0;
         int age = 0;
         int length = 1;
         mono_float gain = 1.0f;
@@ -105,9 +108,11 @@ namespace vital {
       }
 
       static mono_float wrapPosition(mono_float value, mono_float length);
+      mono_float inputValueAt(int input_index, int frame, int lane) const;
       mono_float readSampleAt(int lane, double position, double increment) const;
       void resetLane(int lane, mono_float start);
-      void spawnGrain(int lane, mono_float start, mono_float end, mono_float pitch_ratio);
+      void spawnGrain(int lane, int frame, mono_float start, mono_float end, mono_float normalized_position,
+                      mono_float pitch_ratio);
       poly_float snapTranspose(poly_float input_midi, poly_float transpose, int quantize);
 
       poly_float pan_amplitude_;

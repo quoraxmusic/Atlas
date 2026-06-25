@@ -26,6 +26,7 @@ namespace vital {
   void GranularModule::init() {
     on_ = createBaseControl("granular_on");
     Value* keytrack = createBaseControl("granular_keytrack");
+    Value* root_key = createBaseControl("granular_root_key");
     Value* transpose_quantize = createBaseControl("granular_transpose_quantize");
     Value* transpose_quantize_key = createBaseControl("granular_transpose_quantize_key");
     Value* transpose_quantize_scale = createBaseControl("granular_transpose_quantize_scale");
@@ -39,9 +40,9 @@ namespace vital {
     Output* density = createPolyModControl("granular_density");
     Output* grain_size = createPolyModControl("granular_grain_size");
     Output* speed = createPolyModControl("granular_speed");
-    Output* position = createPolyModControl("granular_position");
-    Output* position_mod = createPolyModControl("granular_position_mod");
-    Output* position_mod_rate = createPolyModControl("granular_position_mod_rate");
+    Output* position = createPolyModControl("granular_position", true, true);
+    Output* position_mod = createPolyModControl("granular_position_mod", true, true);
+    Output* position_mod_rate = createPolyModControl("granular_position_mod_rate", true, true);
     Output* random_position = createPolyModControl("granular_random_position");
     Output* random_volume = createPolyModControl("granular_random_volume");
     Output* random_pan = createPolyModControl("granular_random_pan");
@@ -60,6 +61,7 @@ namespace vital {
     granular_->useInput(input(kMidi), GranularSource::kMidi);
     granular_->useInput(input(kNoteCount), GranularSource::kNoteCount);
     granular_->plug(keytrack, GranularSource::kKeytrack);
+    granular_->plug(root_key, GranularSource::kRootKey);
     granular_->plug(transpose, GranularSource::kTranspose);
     granular_->plug(transpose_quantize, GranularSource::kTransposeQuantize);
     granular_->plug(transpose_quantize_key, GranularSource::kTransposeQuantizeKey);

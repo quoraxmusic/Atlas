@@ -127,6 +127,7 @@ namespace vital {
         kVoiceEvent,
         kMidi,
         kKeytrack,
+        kRootKey,
         kLevel,
         kRandomPhase,
         kTranspose,

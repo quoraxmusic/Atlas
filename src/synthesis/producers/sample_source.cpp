@@ -412,7 +412,7 @@ namespace vital {
 
     poly_float input_midi = 0.0f;
     if (input(kKeytrack)->at(0)[0])
-      input_midi = input(kMidi)->at(0) - kMidiTrackCenter;
+      input_midi = input(kMidi)->at(0) - input(kRootKey)->at(0);
 
     int transpose_quantize = static_cast<int>(input(kTransposeQuantize)->at(0)[0]);
     int quantize_scale = static_cast<int>(input(kTransposeQuantizeScale)->at(0)[0]);

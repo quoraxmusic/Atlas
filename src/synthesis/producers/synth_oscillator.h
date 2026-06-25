@@ -91,6 +91,7 @@ namespace vital {
         kActiveVoices,
         kReset,
         kRetrigger,
+        kNotePressed,
         kNumInputs
       };
 

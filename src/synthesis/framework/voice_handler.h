@@ -68,6 +68,7 @@ namespace vital {
       force_inline const VoiceState& state() { return state_; }
       force_inline const KeyState last_key_state() { return last_key_state_; }
       force_inline const KeyState key_state() { return key_state_; }
+      force_inline bool adjacentSameNoteRetrigger() { return adjacent_same_note_retrigger_; }
       force_inline int event_sample() { return event_sample_; }
       force_inline int voice_index() { return voice_index_; }
       force_inline poly_mask voice_mask() { return voice_mask_; }
@@ -81,6 +82,8 @@ namespace vital {
       force_inline void activate(int midi_note, mono_float tuned_note, mono_float velocity,
                                  poly_float last_note, int note_pressed, int note_count,
                                  int sample, int channel) {
+        adjacent_same_note_retrigger_ = key_state_ == kReleased && event_sample_ == sample &&
+                                        state_.midi_note == midi_note && state_.channel == channel;
         event_sample_ = sample;
         state_.event = kVoiceOn;
         state_.midi_note = midi_note;
@@ -139,17 +142,20 @@ namespace vital {
       }
 
       force_inline void deactivate(int sample = 0) {
+        adjacent_same_note_retrigger_ = false;
         event_sample_ = sample;
         state_.event = kVoiceOff;
         setKeyState(kReleased);
       }
 
       force_inline void kill(int sample = 0) {
+        adjacent_same_note_retrigger_ = false;
         event_sample_ = sample;
         state_.event = kVoiceKill;
       }
 
       force_inline void markDead() {
+        adjacent_same_note_retrigger_ = false;
         setKeyState(kDead);
       }
 
@@ -179,6 +185,7 @@ namespace vital {
         event_sample_ = -1;
         if (key_state_ == kTriggering)
           setKeyState(kHeld);
+        adjacent_same_note_retrigger_ = false;
       }
 
       force_inline void shiftVoiceEvent(int num_samples) {
@@ -206,6 +213,7 @@ namespace vital {
 
       force_inline void clearEvents() {
         event_sample_ = -1;
+        adjacent_same_note_retrigger_ = false;
         aftertouch_sample_ = -1;
         slide_sample_ = -1;
       }
@@ -227,6 +235,7 @@ namespace vital {
       poly_mask voice_mask_;
       std::vector<Voice*> shared_voices_;
       int event_sample_;
+      bool adjacent_same_note_retrigger_;
       VoiceState state_;
       KeyState last_key_state_;
       KeyState key_state_;

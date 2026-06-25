@@ -68,6 +68,7 @@ namespace vital {
     oscillator_->useInput(input(kReset), SynthOscillator::kReset);
     oscillator_->useInput(input(kRetrigger), SynthOscillator::kRetrigger);
     oscillator_->useInput(input(kActiveVoices), SynthOscillator::kActiveVoices);
+    oscillator_->useInput(input(kNotePressed), SynthOscillator::kNotePressed);
     oscillator_->useInput(input(kMidi), SynthOscillator::kMidiNote);
     oscillator_->plug(wave_frame, SynthOscillator::kWaveFrame);
     oscillator_->plug(midi_track, SynthOscillator::kMidiTrack);

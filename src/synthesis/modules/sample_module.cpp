@@ -32,6 +32,7 @@ namespace vital {
     Value* bounce = createBaseControl("sample_bounce");
     Value* playback_mode = createBaseControl("sample_playback_mode");
     Value* keytrack = createBaseControl("sample_keytrack");
+    Value* root_key = createBaseControl("sample_root_key");
     Value* transpose_quantize = createBaseControl("sample_transpose_quantize");
     Value* transpose_quantize_key = createBaseControl("sample_transpose_quantize_key");
     Value* transpose_quantize_scale = createBaseControl("sample_transpose_quantize_scale");
@@ -54,6 +55,7 @@ namespace vital {
     sampler_->useInput(input(kNoteCount), SampleSource::kNoteCount);
     sampler_->plug(random_phase, SampleSource::kRandomPhase);
     sampler_->plug(keytrack, SampleSource::kKeytrack);
+    sampler_->plug(root_key, SampleSource::kRootKey);
     sampler_->plug(loop, SampleSource::kLoop);
     sampler_->plug(bounce, SampleSource::kBounce);
     sampler_->plug(playback_mode, SampleSource::kPlaybackMode);

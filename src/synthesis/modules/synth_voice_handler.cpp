@@ -168,6 +168,7 @@ namespace vital {
     producers_->plug(note(), ProducersModule::kZoneMidi);
     producers_->plug(velocity(), ProducersModule::kVelocity);
     producers_->plug(note_count(), ProducersModule::kNoteCount);
+    producers_->plug(note_pressed(), ProducersModule::kNotePressed);
     producers_->plug(active_mask(), ProducersModule::kActiveVoices);
     addSubmodule(producers_);
     addProcessor(producers_);
