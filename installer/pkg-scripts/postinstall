@@ -1,0 +1,32 @@
+#!/bin/zsh
+set -e
+
+console_user=$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)
+if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "loginwindow" ]]; then
+  exit 0
+fi
+
+home_dir=$(/usr/bin/dscl . -read "/Users/$console_user" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')
+if [[ -z "$home_dir" || ! -d "$home_dir" ]]; then
+  home_dir="/Users/$console_user"
+fi
+
+atlas_dir="$home_dir/Documents/Alessio Plugins/Atlas"
+guide_source="/Library/Application Support/Atlas/Accessible Layout Guide.html"
+guide_destination="$atlas_dir/Accessible Layout Guide.html"
+
+/bin/mkdir -p "$atlas_dir/Factory/Presets"
+/bin/mkdir -p "$atlas_dir/Factory/Wavetables"
+/bin/mkdir -p "$atlas_dir/Factory/Samples"
+/bin/mkdir -p "$atlas_dir/Factory/LFOs"
+/bin/mkdir -p "$atlas_dir/User/Presets"
+/bin/mkdir -p "$atlas_dir/User/Wavetables"
+/bin/mkdir -p "$atlas_dir/User/Samples"
+/bin/mkdir -p "$atlas_dir/User/LFOs"
+
+if [[ -f "$guide_source" ]]; then
+  /bin/cp "$guide_source" "$guide_destination"
+fi
+
+/usr/sbin/chown -R "$console_user":staff "$atlas_dir" 2>/dev/null || true
+exit 0

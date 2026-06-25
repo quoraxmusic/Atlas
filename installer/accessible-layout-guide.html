@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas Layout Guide</title>
+  <style>
+    body {
+      margin: 0;
+      color: #15171a;
+      background: #f7f8fa;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    h1, h2 {
+      line-height: 1.2;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+    }
+
+    h2 {
+      margin: 32px 0 10px;
+      font-size: 1.35rem;
+    }
+
+    p, li {
+      max-width: 76ch;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 24px;
+      background: white;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border: 1px solid #d9dde3;
+      padding: 10px 12px;
+    }
+
+    th {
+      background: #eef1f5;
+    }
+
+    code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: #eceff3;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Atlas Layout Guide</h1>
+  <p>
+    Atlas exposes its controls as a VoiceOver-friendly hierarchy.
+    The first level is groups such as Presets, Global, Signal routing, Oscillators,
+    Filters, Busses, Envelopes, LFOs, Effects, Modulations, and Macros. Inside each group,
+    sections contain the actual buttons, choosers, sliders, and editors.
+  </p>
+
+  <h2>Navigation</h2>
+  <ul>
+    <li>Use VoiceOver interaction to enter a group or section.</li>
+    <li>The Presets group contains browser controls, preset loading, preview, search, bank, and category controls.</li>
+    <li>Oscillator sections include Load, Previous, Next, and Browse controls for wavetables. The Sample section has the matching sample controls.</li>
+    <li>The Signal routing group exposes oscillator routing, filter routing, bus sends, and filter serial modes.</li>
+    <li>The Busses group contains Bus 1, Bus 2, and Bus 3. Each bus has Chain and routing plus the same effects as the main chain.</li>
+    <li>The Effects group contains Chain and routing, then each effect by name.</li>
+  </ul>
+
+  <h2>Keyboard Shortcuts</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Shortcut</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Up Arrow</code> / <code>Down Arrow</code></td>
+        <td>Small slider changes.</td>
+      </tr>
+      <tr>
+        <td><code>Page Up</code> / <code>Page Down</code></td>
+        <td>Larger slider changes.</td>
+      </tr>
+      <tr>
+        <td><code>Enter</code></td>
+        <td>Open an inline value field for the focused slider.</td>
+      </tr>
+      <tr>
+        <td><code>Backspace</code> or <code>Delete</code></td>
+        <td>Reset the focused parameter to its default value.</td>
+      </tr>
+      <tr>
+        <td><code>VO Shift M</code></td>
+        <td>Open modulation assignment for the focused parameter.</td>
+      </tr>
+      <tr>
+        <td><code>Return</code> in inline fields</td>
+        <td>Apply the typed value or modulation amount.</td>
+      </tr>
+      <tr>
+        <td><code>Escape</code> in inline fields</td>
+        <td>Cancel the typed value or modulation amount.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Preset Workflow</h2>
+  <p>
+    Open the Presets group, choose a bank or category if desired, type in Search,
+    then select a preset. Press Enter or use Load selected preset to load it. Loading
+    and changing presets preserves VoiceOver focus whenever possible.
+  </p>
+
+  <h2>Wavetables and Samples</h2>
+  <p>
+    Each oscillator has Load wavetable, Previous wavetable, Next wavetable, and
+    Browse wavetable folders. Browse wavetable folders opens the folder tree under
+    the Atlas wavetable paths. The Sample oscillator offers the same workflow for
+    audio samples.
+  </p>
+
+  <h2>Bus Workflow</h2>
+  <p>
+    Set an oscillator, the sample oscillator, filter 1, or filter 2 destination to
+    Bus 1, Bus 2, or Bus 3 from Signal routing or from that source section. Then open the
+    Busses group and choose the bus to edit its effect chain. Busses can be routed to
+    the main chain, direct out, or another bus when that does not create feedback.
+  </p>
+
+  <h2>Modulation Workflow</h2>
+  <p>
+    Focus a parameter and press <code>VO Shift M</code>. Choose a modulation source.
+    Atlas then focuses an inline text field where you can type the starting maximum
+    modulation amount. You can fine-tune the amount later in the Modulations group.
+  </p>
+
+  <h2>LFO Editor</h2>
+  <p>
+    The LFO group includes shape selection and a keyboard editor. Use comma and
+    period to move between points, A to add a point, E to delete a point, arrows to
+    move or edit points, minus and equals to change grid size, and semicolon or
+    apostrophe to change cycle length. The focused editor summary shows the selected
+    point, time, value, and curve.
+  </p>
+
+  <h2>Installed Atlas Folder</h2>
+  <p>
+    The installer creates <code>~/Documents/Alessio Plugins/Atlas</code> for the
+    logged-in user if it does not exist, including Factory and User folders for
+    Presets, Wavetables, Samples, and LFOs.
+    This guide is copied there as <code>Accessible Layout Guide.html</code>.
+  </p>
+</main>
+</body>
+</html>
