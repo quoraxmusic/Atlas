@@ -12,7 +12,7 @@ The installer also creates the Atlas content folder if needed:
 
 `~/Documents/Alessio Plugins/Atlas`
 
-Inside it you should have Factory and User folders for presets, wavetables, samples, and LFOs.
+Inside it you should have Factory and User folders for presets, wavetables, samples, LFOs, and FX presets.
 
 ## After installing
 

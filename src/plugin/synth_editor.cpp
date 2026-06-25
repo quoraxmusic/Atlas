@@ -48,6 +48,10 @@ namespace {
 
   void postPluginAnnouncement(const String&, AccessibilityHandler::AnnouncementPriority) { }
 
+  void postLfoAnnouncement(const String& message) {
+    AccessibilityHandler::postAnnouncement(message, AccessibilityHandler::AnnouncementPriority::high);
+  }
+
   struct MsegTimeDivision {
     const char* name;
     float quarter_notes;
@@ -967,6 +971,39 @@ namespace {
     return name;
   }
 
+  String effectIdForSection(const String& section) {
+    const String effect_section = accessibleSectionTitle(section);
+    for (int i = 0; i < vital::constants::kNumEffects; ++i) {
+      const String effect_id = strings::kEffectOrder[i];
+      if (effectSectionForPrefixedId(effect_id + "_on", {}) == effect_section)
+        return effect_id;
+    }
+    return {};
+  }
+
+  String effectPresetDisplayName(const String& effect_id) {
+    return effectSectionForPrefixedId(effect_id + "_on", {});
+  }
+
+  String bankRelativePathForFile(const File& file, const File& source_folder, const String& folder_name) {
+    StringArray parts;
+    parts.addTokens(file.getRelativePathFrom(source_folder), File::getSeparatorString(), "");
+    const int folder_index = indexOfPathPart(parts, folder_name);
+    if (folder_index >= 0 && folder_index + 1 < parts.size()) {
+      StringArray stripped;
+      for (int i = folder_index + 1; i < parts.size(); ++i)
+        stripped.add(parts[i]);
+      return stripped.joinIntoString("/");
+    }
+    return parts.joinIntoString("/");
+  }
+
+  bool pathContainsFolderName(const File& file, const File& source_folder, const String& folder_name) {
+    StringArray parts;
+    parts.addTokens(file.getRelativePathFrom(source_folder), File::getSeparatorString(), "");
+    return indexOfPathPart(parts, folder_name) >= 0;
+  }
+
   String sectionForParameter(const String& id) {
     const String bus_section = busEffectSectionForParameter(id);
     if (bus_section.isNotEmpty())
@@ -1192,6 +1229,32 @@ namespace {
 
   String percentString(float value) {
     return String(roundToInt(jlimit(0.0f, 1.0f, value) * 100.0f)) + "%";
+  }
+
+  int shiftedDigitIndex(const KeyPress& key) {
+    if (!key.getModifiers().isShiftDown())
+      return -1;
+
+    switch (key.getTextCharacter()) {
+      case '!': return 0;
+      case '@': return 1;
+      case '#': return 2;
+      case '$': return 3;
+      case '%': return 4;
+      case '^': return 5;
+      case '&': return 6;
+      case '*': return 7;
+      case '(': return 8;
+      case ')': return 9;
+      default: break;
+    }
+
+    const int key_code = key.getKeyCode();
+    if (key_code >= '1' && key_code <= '9')
+      return key_code - '1';
+    if (key_code == '0')
+      return 9;
+    return -1;
   }
 
   bool isTransposeQuantizeParameter(const String& id) {
@@ -2495,8 +2558,7 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
     active_lfo_index_ = jlimit(0, vital::kNumLfos - 1, lfo_mseg_lfo_.getSelectedItemIndex());
     selectSectionByName("LFO " + String(active_lfo_index_ + 1), true);
     refreshLfoMsegControls();
-    postPluginAnnouncement("Editing LFO " + String(active_lfo_index_ + 1),
-                                           AccessibilityHandler::AnnouncementPriority::medium);
+    postLfoAnnouncement("Editing LFO " + String(active_lfo_index_ + 1));
   };
   addChildComponent(lfo_mseg_lfo_);
 
@@ -2540,8 +2602,7 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
     lfo_grid_index_ = jlimit(0, static_cast<int>(msegTimeDivisions().size()) - 1,
                              lfo_mseg_grid_.getSelectedItemIndex());
     updateLfoMsegSummary();
-    postPluginAnnouncement("Grid " + lfo_mseg_grid_.getText() + ". " + lfoMsegStatusText(),
-                                           AccessibilityHandler::AnnouncementPriority::high);
+    postLfoAnnouncement("Grid " + lfo_mseg_grid_.getText() + ". " + lfoMsegStatusText());
   };
   addChildComponent(lfo_mseg_grid_);
 
@@ -2567,8 +2628,19 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   lfo_mseg_point_.setHelpText("Choose a point, then use the edit buttons to move it or change its value and curve");
   lfo_mseg_point_.setWantsKeyboardFocus(true);
   lfo_mseg_point_.onChange = [this] {
-    if (!updating_lfo_mseg_controls_)
+    if (!updating_lfo_mseg_controls_) {
+      if (auto* generator = activeLfoGenerator()) {
+        const int index = selectedLfoPointIndex();
+        if (isPositiveAndBelow(index, generator->getNumPoints())) {
+          lfo_cursor_phase_ = generator->getPoint(index).first;
+          if (!lfo_multi_selection_mode_) {
+            selected_lfo_point_phases_.clear();
+            selected_lfo_point_phases_.push_back(lfo_cursor_phase_);
+          }
+        }
+      }
       updateLfoMsegSummary();
+    }
   };
   addChildComponent(lfo_mseg_point_);
 
@@ -3345,6 +3417,8 @@ void SynthEditor::showSection(int index, bool announce) {
                       [this, oscillator] { loadShiftedWavetable(oscillator, -1); });
       addActionButton("Next wavetable", "Load the next wavetable into " + section_name,
                       [this, oscillator] { loadShiftedWavetable(oscillator, 1); });
+      addActionButton("Export wavetable", "Save the current wavetable from " + section_name,
+                      [this, oscillator] { saveWavetableFile(oscillator); });
       if (wavetable_editor_visible_[oscillator]) {
         addActionButton("Hide wavetable editor", "Hide the wavetable editor controls",
                         [this, oscillator] { setWavetableEditorVisible(oscillator, false); });
@@ -3372,6 +3446,21 @@ void SynthEditor::showSection(int index, bool announce) {
                     [this] { loadShiftedSample(-1, true); });
     addActionButton("Next sample", "Load the next sample into Granular",
                     [this] { loadShiftedSample(1, true); });
+  }
+  else if (section_name.startsWith("LFO ")) {
+    const int lfo = section_name.fromFirstOccurrenceOf("LFO ", false, false).getIntValue() - 1;
+    if (isPositiveAndBelow(lfo, vital::kNumLfos)) {
+      addActionButton("Import LFO preset", "Load an LFO shape into " + section_name,
+                      [this, lfo] { chooseLfoPresetFile(lfo); });
+      addActionButton("Save LFO preset", "Save the current shape from " + section_name,
+                      [this, lfo] { saveLfoPresetFile(lfo); });
+    }
+  }
+  else if (effectIdForSection(section_name).isNotEmpty()) {
+    addActionButton("Import FX preset", "Load an FX preset into " + accessibleSectionTitle(section_name),
+                    [this, section_name] { chooseEffectPresetFile(section_name); });
+    addActionButton("Save FX preset", "Save the current " + accessibleSectionTitle(section_name) + " settings",
+                    [this, section_name] { saveEffectPresetFile(section_name); });
   }
 
   if (routing_controls_visible_) {
@@ -3758,6 +3847,8 @@ void SynthEditor::showAllSections(bool announce) {
                           [this, oscillator] { loadShiftedWavetable(oscillator, -1); });
           addActionButton("Next wavetable", "Load the next wavetable into " + section_name,
                           [this, oscillator] { loadShiftedWavetable(oscillator, 1); });
+          addActionButton("Export wavetable", "Save the current wavetable from " + section_name,
+                          [this, oscillator] { saveWavetableFile(oscillator); });
           if (wavetable_editor_visible_[oscillator]) {
             addActionButton("Hide wavetable editor", "Hide the wavetable editor controls",
                             [this, oscillator] { setWavetableEditorVisible(oscillator, false); });
@@ -3816,6 +3907,11 @@ void SynthEditor::showAllSections(bool announce) {
       else if (section_name.startsWith("LFO ")) {
         const int lfo = section_name.fromFirstOccurrenceOf("LFO ", false, false).getIntValue() - 1;
         if (isPositiveAndBelow(lfo, vital::kNumLfos)) {
+          addActionButton("Import LFO preset", "Load an LFO shape into " + section_name,
+                          [this, lfo] { chooseLfoPresetFile(lfo); });
+          addActionButton("Save LFO preset", "Save the current shape from " + section_name,
+                          [this, lfo] { saveLfoPresetFile(lfo); });
+
           auto shape = std::make_unique<OffscreenComboBox>();
           auto* shape_ptr = shape.get();
           shape_ptr->setTitle(section_name + " shape preset");
@@ -3874,6 +3970,12 @@ void SynthEditor::showAllSections(bool announce) {
           section_headers_.push_back(std::move(keyboard));
           section_y += 82;
         }
+      }
+      else if (effectIdForSection(section_name).isNotEmpty()) {
+        addActionButton("Import FX preset", "Load an FX preset into " + accessibleSectionTitle(section_name),
+                        [this, section_name] { chooseEffectPresetFile(section_name); });
+        addActionButton("Save FX preset", "Save the current " + accessibleSectionTitle(section_name) + " settings",
+                        [this, section_name] { saveEffectPresetFile(section_name); });
       }
 
       for (auto* parameter : sections_[section_name]) {
@@ -4040,6 +4142,7 @@ void SynthEditor::showNavigationMenu() {
   menu.addItem(34, "Import bank");
   menu.addItem(35, "Save to user presets");
   menu.addItem(36, "Save preset as");
+  menu.addItem(37, "Export folder as bank");
 
   menu.addSeparator();
   menu.addSectionHeader("Routing");
@@ -4091,6 +4194,8 @@ void SynthEditor::showNavigationMenu() {
       savePresetToUserDirectory();
     if (result == 36)
       savePresetAs();
+    if (result == 37)
+      chooseFolderToExportBank();
   });
 }
 
@@ -4465,6 +4570,7 @@ void SynthEditor::showPresetMenu() {
   menu.addSeparator();
   menu.addItem(3, "Open preset file...");
   menu.addItem(4, "Import bank...");
+  menu.addItem(8, "Export folder as bank...");
   menu.addSeparator();
   menu.addItem(5, "Save to user presets");
   menu.addItem(6, "Save preset as...");
@@ -4481,6 +4587,8 @@ void SynthEditor::showPresetMenu() {
       choosePresetFile();
     else if (result == 4)
       chooseBankFile();
+    else if (result == 8)
+      chooseFolderToExportBank();
     else if (result == 5)
       savePresetToUserDirectory();
     else if (result == 6)
@@ -4592,6 +4700,103 @@ void SynthEditor::importBankFile(const File& file) {
   NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to import bank",
                                         unzip_result.getErrorMessage());
   postPluginAnnouncement("Unable to import bank", AccessibilityHandler::AnnouncementPriority::high);
+}
+
+void SynthEditor::chooseFolderToExportBank() {
+  preset_chooser_ = std::make_unique<FileChooser>("Choose folder to export as an Atlas bank",
+                                                  LoadSave::getUserPresetDirectory());
+  preset_chooser_->launchAsync(FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories,
+                               [this](const FileChooser& chooser) {
+    const File source_folder = chooser.getResult();
+    preset_chooser_.reset();
+    if (!source_folder.isDirectory())
+      return;
+
+    String bank_name = source_folder.getFileName().removeCharacters("\\/:*?\"<>|");
+    if (bank_name.isEmpty())
+      bank_name = "Atlas Bank";
+    const File default_file = source_folder.getSiblingFile(bank_name).withFileExtension(vital::kBankExtension);
+    bank_chooser_ = std::make_unique<FileChooser>("Export Atlas bank", default_file,
+                                                  String("*.") + vital::kBankExtension);
+    bank_chooser_->launchAsync(FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles |
+                                   FileBrowserComponent::warnAboutOverwriting,
+                               [this, source_folder](const FileChooser& save_chooser) {
+      const File destination = save_chooser.getResult();
+      if (destination != File())
+        exportFolderAsBank(source_folder, destination);
+      bank_chooser_.reset();
+    });
+  });
+}
+
+void SynthEditor::exportFolderAsBank(const File& sourceFolder, const File& destinationFile) {
+  if (!sourceFolder.isDirectory()) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to export bank",
+                                          "The selected source is not a folder.");
+    return;
+  }
+
+  Array<File> files;
+  sourceFolder.findChildFiles(files, File::findFiles, true,
+                              vital::kPresetExtensionsList + ";*." + vital::kWavetableExtension +
+                              ";*." + vital::kLegacyWavetableExtension + ";" + vital::kSampleExtensionsList +
+                              ";" + vital::kLfoExtensionsList + ";*." + vital::kFxExtension);
+  if (files.isEmpty()) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to export bank",
+                                          "No Atlas presets, tables, samples, LFOs, or FX presets were found.");
+    postPluginAnnouncement("No bank content found", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  const File destination = destinationFile.withFileExtension(vital::kBankExtension);
+  String bank_name = destination.getFileNameWithoutExtension().removeCharacters("\\/:*?\"<>|");
+  if (bank_name.isEmpty())
+    bank_name = "Atlas Bank";
+
+  ZipFile::Builder bank_zip;
+  int added = 0;
+  for (const File& file : files) {
+    const String extension = file.getFileExtension().toLowerCase();
+    String folder_name;
+    if (extension == "." + String(vital::kPresetExtension) ||
+        extension == "." + String(vital::kLegacyPresetExtension)) {
+      folder_name = LoadSave::kPresetFolderName;
+    }
+    else if (extension == "." + String(vital::kWavetableExtension) ||
+             extension == "." + String(vital::kLegacyWavetableExtension)) {
+      folder_name = LoadSave::kWavetableFolderName;
+    }
+    else if (extension == "." + String(vital::kLfoExtension) ||
+             extension == "." + String(vital::kLegacyLfoExtension)) {
+      folder_name = LoadSave::kLfoFolderName;
+    }
+    else if (extension == "." + String(vital::kFxExtension)) {
+      folder_name = LoadSave::kFxFolderName;
+    }
+    else if (extension == ".wav" || extension == ".flac" || extension == ".aif" || extension == ".aiff") {
+      folder_name = pathContainsFolderName(file, sourceFolder, LoadSave::kWavetableFolderName) ?
+                    LoadSave::kWavetableFolderName : LoadSave::kSampleFolderName;
+    }
+    else {
+      continue;
+    }
+
+    const String relative_path = bankRelativePathForFile(file, sourceFolder, folder_name);
+    bank_zip.addFile(file, 9, bank_name + "/" + folder_name + "/" + relative_path);
+    ++added;
+  }
+
+  FileOutputStream output(destination);
+  if (!output.openedOk() || !bank_zip.writeToStream(output, nullptr)) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to export bank",
+                                          "The bank file could not be written.");
+    postPluginAnnouncement("Unable to export bank", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  postPluginAnnouncement("Exported bank " + destination.getFileNameWithoutExtension() +
+                                         " with " + String(added) + " files",
+                                         AccessibilityHandler::AnnouncementPriority::high);
 }
 
 void SynthEditor::savePresetToUserDirectory() {
@@ -4725,6 +4930,45 @@ int SynthEditor::selectedLfoPointIndex() const {
   return lfo_mseg_point_.getSelectedItemIndex();
 }
 
+int SynthEditor::lfoPointIndexAtPhase(float phase) const {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return -1;
+
+  for (int i = 0; i < generator->getNumPoints(); ++i) {
+    if (std::abs(generator->getPoint(i).first - phase) <= 0.0005f)
+      return i;
+  }
+  return -1;
+}
+
+bool SynthEditor::isLfoPointSelected(float phase) const {
+  return std::any_of(selected_lfo_point_phases_.begin(), selected_lfo_point_phases_.end(),
+                     [phase](float selected) { return std::abs(selected - phase) <= 0.0005f; });
+}
+
+std::vector<int> SynthEditor::selectedLfoPointIndices() const {
+  std::vector<int> indices;
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return indices;
+
+  for (int i = 0; i < generator->getNumPoints(); ++i) {
+    if (isLfoPointSelected(generator->getPoint(i).first))
+      indices.push_back(i);
+  }
+  return indices;
+}
+
+void SynthEditor::pruneSelectedLfoPointPhases() {
+  selected_lfo_point_phases_.erase(std::remove_if(selected_lfo_point_phases_.begin(),
+                                                  selected_lfo_point_phases_.end(),
+                                                  [this](float phase) {
+                                                    return lfoPointIndexAtPhase(phase) < 0;
+                                                  }),
+                                   selected_lfo_point_phases_.end());
+}
+
 float SynthEditor::lfoCycleQuarterNotes() const {
   const auto& divisions = msegTimeDivisions();
   const int cycle = jlimit(0, static_cast<int>(divisions.size()) - 1, lfo_cycle_index_);
@@ -4791,7 +5035,7 @@ String SynthEditor::lfoMsegStatusTextFor(int lfoIndex) const {
   auto* generator = lfoGeneratorForIndex(lfoIndex);
   if (generator == nullptr)
     return "LFO editor unavailable";
-  const int selected = lfoIndex == active_lfo_index_ ? selectedLfoPointIndex() : 0;
+  const int selected = lfoIndex == active_lfo_index_ ? lfoPointIndexAtPhase(lfo_cursor_phase_) : 0;
   if (isPositiveAndBelow(selected, generator->getNumPoints()))
     return lfoPointDescriptionFor(lfoIndex, selected) + ", grid " + String(msegTimeDivisions()[lfo_grid_index_].name);
   return lfoTimeDescription(lfo_cursor_phase_) + ", value " +
@@ -4809,9 +5053,7 @@ void SynthEditor::applyLfoMode() {
                                    : vital::SynthLfo::kTrigger;
   setParameterEngineValue("lfo_" + String(active_lfo_index_ + 1) + "_sync_type",
                           static_cast<float>(vital_mode));
-  postPluginAnnouncement("LFO " + String(active_lfo_index_ + 1) +
-                                         " mode " + lfo_mseg_mode_.getText(),
-                                         AccessibilityHandler::AnnouncementPriority::medium);
+  postLfoAnnouncement("Mode " + lfo_mseg_mode_.getText() + ". Editing LFO " + String(active_lfo_index_ + 1));
 }
 
 void SynthEditor::applyLfoCycleLength() {
@@ -4825,8 +5067,7 @@ void SynthEditor::applyLfoCycleLength() {
   setParameterEngineValue(prefix + "sync", vital::SynthLfo::kTempo);
   setParameterEngineValue(prefix + "tempo", static_cast<float>(tempo_index));
   lfo_cursor_phase_ = snapLfoPhaseToGrid(lfo_cursor_phase_);
-  postPluginAnnouncement("Cycle length " + String(divisions[index].name) + ". " + lfoMsegStatusText(),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement("Cycle length " + String(divisions[index].name));
 }
 
 void SynthEditor::setLfoMsegControlsVisible(bool visible) {
@@ -4869,6 +5110,7 @@ void SynthEditor::refreshLfoMsegControls() {
                                       dontSendNotification);
   if (auto* generator = activeLfoGenerator()) {
     lfo_mseg_smooth_.setToggleState(generator->smooth(), dontSendNotification);
+    pruneSelectedLfoPointPhases();
     updateLfoPointSelector();
   }
   updateLfoMsegSummary();
@@ -4892,7 +5134,7 @@ void SynthEditor::updateLfoMsegSummary() {
   auto* generator = activeLfoGenerator();
   String summary = "Accessible MSEG editor unavailable";
   if (generator) {
-    const int point_index = selectedLfoPointIndex();
+    const int point_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
     summary = "Editing LFO " + String(active_lfo_index_ + 1) +
               ", " + String(generator->getNumPoints()) + " points";
     if (isPositiveAndBelow(point_index, generator->getNumPoints()))
@@ -4918,36 +5160,63 @@ void SynthEditor::moveLfoCursor(float delta) {
   lfo_cursor_phase_ = snapLfoPhaseToGrid(jlimit(0.0f, 1.0f, lfo_cursor_phase_ + delta));
   auto* generator = activeLfoGenerator();
   if (generator) {
-    int found = -1;
-    for (int i = 0; i < generator->getNumPoints(); ++i) {
-      if (std::abs(generator->getPoint(i).first - lfo_cursor_phase_) <= 0.0005f) {
-        found = i;
-        break;
-      }
-    }
+    const int found = lfoPointIndexAtPhase(lfo_cursor_phase_);
     if (found >= 0)
       lfo_mseg_point_.setSelectedItemIndex(found, dontSendNotification);
   }
   updateLfoMsegSummary();
-  postPluginAnnouncement(lfoMsegStatusText(), AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement(lfoMsegStatusText());
 }
 
 void SynthEditor::moveToLfoPoint(int direction) {
   auto* generator = activeLfoGenerator();
-  if (generator == nullptr || generator->getNumPoints() == 0)
+  if (generator == nullptr || generator->getNumPoints() == 0) {
+    postLfoAnnouncement("No points");
     return;
-  const int next = jlimit(0, generator->getNumPoints() - 1, selectedLfoPointIndex() + direction);
+  }
+
+  const float tolerance = 0.0005f;
+  int next = -1;
+  const int current = lfoPointIndexAtPhase(lfo_cursor_phase_);
+
+  if (current >= 0) {
+    next = jlimit(0, generator->getNumPoints() - 1, current + direction);
+  }
+  else if (direction > 0) {
+    for (int i = 0; i < generator->getNumPoints(); ++i) {
+      if (generator->getPoint(i).first > lfo_cursor_phase_ + tolerance) {
+        next = i;
+        break;
+      }
+    }
+    if (next < 0)
+      next = generator->getNumPoints() - 1;
+  }
+  else {
+    for (int i = generator->getNumPoints() - 1; i >= 0; --i) {
+      if (generator->getPoint(i).first < lfo_cursor_phase_ - tolerance) {
+        next = i;
+        break;
+      }
+    }
+    if (next < 0)
+      next = 0;
+  }
+
   lfo_mseg_point_.setSelectedItemIndex(next, sendNotificationSync);
   lfo_cursor_phase_ = generator->getPoint(next).first;
-  postPluginAnnouncement(lfoMsegStatusText(), AccessibilityHandler::AnnouncementPriority::high);
+  if (!lfo_multi_selection_mode_) {
+    selected_lfo_point_phases_.clear();
+    selected_lfo_point_phases_.push_back(lfo_cursor_phase_);
+  }
+  postLfoAnnouncement(lfoMsegStatusText());
 }
 
 void SynthEditor::stepLfoShapePreset(int direction) {
   const int count = jmax(1, lfo_mseg_shape_.getNumItems());
   const int next = jlimit(0, count - 1, lfo_mseg_shape_.getSelectedItemIndex() + direction);
   lfo_mseg_shape_.setSelectedItemIndex(next, dontSendNotification);
-  postPluginAnnouncement("Shape preset " + lfo_mseg_shape_.getText(),
-                                         AccessibilityHandler::AnnouncementPriority::medium);
+  postLfoAnnouncement("Shape preset " + lfo_mseg_shape_.getText());
 }
 
 void SynthEditor::stepLfoCycleLength(int direction) {
@@ -4963,8 +5232,15 @@ void SynthEditor::stepLfoGrid(int direction) {
   lfo_grid_index_ = jlimit(0, count - 1, lfo_grid_index_ + direction);
   lfo_mseg_grid_.setSelectedItemIndex(lfo_grid_index_, dontSendNotification);
   updateLfoMsegSummary();
-  postPluginAnnouncement("Grid " + lfo_mseg_grid_.getText() + ". " + lfoMsegStatusText(),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement("Grid " + lfo_mseg_grid_.getText() + ". " + lfoMsegStatusText());
+}
+
+void SynthEditor::switchLfoFromShortcut(int lfoIndex) {
+  active_lfo_index_ = jlimit(0, vital::kNumLfos - 1, lfoIndex);
+  lfo_cursor_phase_ = 0.0f;
+  selected_lfo_point_phases_.clear();
+  refreshLfoMsegControls();
+  postLfoAnnouncement("Editing LFO " + String(active_lfo_index_ + 1));
 }
 
 void SynthEditor::clearLfoShape() {
@@ -4981,15 +5257,21 @@ void SynthEditor::clearLfoShape() {
   generator->render();
   synth_.pauseProcessing(false);
   lfo_cursor_phase_ = 0.0f;
+  selected_lfo_point_phases_.clear();
   refreshLfoMsegControls();
-  postPluginAnnouncement("Cleared LFO " + String(active_lfo_index_ + 1),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement("Cleared LFO " + String(active_lfo_index_ + 1));
 }
 
 bool SynthEditor::handleLfoMsegShortcut(const KeyPress& key) {
   const juce_wchar character = CharacterFunctions::toLowerCase(key.getTextCharacter());
   const bool shift = key.getModifiers().isShiftDown();
   const bool command = key.getModifiers().isCommandDown();
+
+  const int lfo_index = shiftedDigitIndex(key);
+  if (lfo_index >= 0 && lfo_index < vital::kNumLfos) {
+    switchLfoFromShortcut(lfo_index);
+    return true;
+  }
 
   if (command && (key == KeyPress::upKey || key == KeyPress::downKey)) {
     lfo_mseg_curve_.setSelectedItemIndex((lfo_mseg_curve_.getSelectedItemIndex() + (key == KeyPress::upKey ? 1 : -1) +
@@ -5013,12 +5295,36 @@ bool SynthEditor::handleLfoMsegShortcut(const KeyPress& key) {
     clearLfoShape();
     return true;
   }
+  if (shift && character == 'c') {
+    copyLfoShape();
+    return true;
+  }
+  if (shift && character == 'v') {
+    pasteLfoShape();
+    return true;
+  }
+  if (shift && character == 'd') {
+    duplicateLfoShapeToNextSlot();
+    return true;
+  }
   if (shift && character == 'a') {
     applyLfoShapePreset();
     return true;
   }
   if (character == 'a') {
     addLfoPoint();
+    return true;
+  }
+  if (shift && character == 's') {
+    toggleLfoMultiSelectionMode();
+    return true;
+  }
+  if (character == 's') {
+    toggleLfoPointSelection();
+    return true;
+  }
+  if (character == 'r') {
+    clearLfoPointSelection();
     return true;
   }
   if (character == 'e' || key.getKeyCode() == KeyPress::deleteKey) {
@@ -5069,65 +5375,198 @@ bool SynthEditor::handleLfoMsegShortcut(const KeyPress& key) {
     return true;
   }
   if (character == 'c') {
-    copied_lfo_points_.clear();
-    if (auto* generator = activeLfoGenerator()) {
-      const int index = selectedLfoPointIndex();
-      if (isPositiveAndBelow(index, generator->getNumPoints())) {
-        copied_lfo_points_.push_back(generator->getPoint(index));
-        postPluginAnnouncement("Copied 1 point",
-                                               AccessibilityHandler::AnnouncementPriority::high);
-      }
-    }
+    copyLfoPoints();
     return true;
   }
   if (character == 'v') {
-    if (!copied_lfo_points_.empty()) {
-      lfo_cursor_phase_ = snapLfoPhaseToGrid(lfo_cursor_phase_);
-      if (auto* generator = activeLfoGenerator()) {
-        if (generator->getNumPoints() >= LineGenerator::kMaxPoints) {
-          postPluginAnnouncement("No more LFO points can be added",
-                                                 AccessibilityHandler::AnnouncementPriority::high);
-          return true;
-        }
-        int insert_index = generator->getNumPoints();
-        for (int i = 0; i < generator->getNumPoints(); ++i) {
-          if (std::abs(generator->getPoint(i).first - lfo_cursor_phase_) <= 0.0005f) {
-            insert_index = i;
-            break;
-          }
-          if (generator->getPoint(i).first > lfo_cursor_phase_) {
-            insert_index = i;
-            break;
-          }
-        }
-
-        const auto copied = copied_lfo_points_.front();
-        synth_.pauseProcessing(true);
-        if (insert_index < generator->getNumPoints() &&
-            std::abs(generator->getPoint(insert_index).first - lfo_cursor_phase_) <= 0.0005f) {
-          generator->setPoint(insert_index, { lfo_cursor_phase_, copied.second });
-        }
-        else {
-          generator->addPoint(insert_index, { lfo_cursor_phase_, copied.second });
-        }
-        generator->render();
-        synth_.pauseProcessing(false);
-        refreshLfoMsegControls();
-        lfo_mseg_point_.setSelectedItemIndex(jlimit(0, generator->getNumPoints() - 1, insert_index),
-                                             dontSendNotification);
-        updateLfoMsegSummary();
-        if (isPositiveAndBelow(insert_index, generator->getNumPoints())) {
-          postPluginAnnouncement("Pasted 1 point at " + lfoTimeDescription(lfo_cursor_phase_),
-                                                 AccessibilityHandler::AnnouncementPriority::high);
-        }
-      }
-    }
-    else {
-      postPluginAnnouncement("No points copied", AccessibilityHandler::AnnouncementPriority::high);
-    }
+    pasteLfoPoints();
     return true;
   }
   return false;
+}
+
+void SynthEditor::toggleLfoPointSelection() {
+  auto* generator = activeLfoGenerator();
+  const int index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (generator == nullptr || index < 0) {
+    postLfoAnnouncement("No point at " + lfoTimeDescription(lfo_cursor_phase_));
+    return;
+  }
+
+  const float phase = generator->getPoint(index).first;
+  const auto existing = std::find_if(selected_lfo_point_phases_.begin(), selected_lfo_point_phases_.end(),
+                                     [phase](float selected) { return std::abs(selected - phase) <= 0.0005f; });
+  if (existing != selected_lfo_point_phases_.end()) {
+    selected_lfo_point_phases_.erase(existing);
+    postLfoAnnouncement("Removed point from selection, " + lfoPointDescription(index));
+  }
+  else {
+    if (!lfo_multi_selection_mode_)
+      selected_lfo_point_phases_.clear();
+    selected_lfo_point_phases_.push_back(phase);
+    postLfoAnnouncement("Added point to selection, " + lfoPointDescription(index));
+  }
+  updateLfoMsegSummary();
+}
+
+void SynthEditor::toggleLfoMultiSelectionMode() {
+  lfo_multi_selection_mode_ = !lfo_multi_selection_mode_;
+  if (!lfo_multi_selection_mode_) {
+    selected_lfo_point_phases_.clear();
+    const int index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+    if (auto* generator = activeLfoGenerator())
+      if (isPositiveAndBelow(index, generator->getNumPoints()))
+        selected_lfo_point_phases_.push_back(generator->getPoint(index).first);
+  }
+  postLfoAnnouncement(lfo_multi_selection_mode_ ? "Multi selection on" : "Multi selection off");
+  updateLfoMsegSummary();
+}
+
+void SynthEditor::clearLfoPointSelection() {
+  selected_lfo_point_phases_.clear();
+  postLfoAnnouncement("Point selection cleared");
+  updateLfoMsegSummary();
+}
+
+void SynthEditor::copyLfoPoints() {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return;
+
+  auto indices = lfo_multi_selection_mode_ ? selectedLfoPointIndices() : std::vector<int>();
+  const int cursor_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.empty() && cursor_index >= 0)
+    indices.push_back(cursor_index);
+  if (indices.empty()) {
+    postLfoAnnouncement("No points selected");
+    return;
+  }
+
+  std::sort(indices.begin(), indices.end());
+  copied_lfo_points_.clear();
+  for (int index : indices) {
+    copied_lfo_points_.push_back({ generator->getPoint(index), generator->getPower(index) });
+  }
+  postLfoAnnouncement("Copied " + String(static_cast<int>(copied_lfo_points_.size())) + " point" +
+                      (copied_lfo_points_.size() == 1 ? "" : "s"));
+}
+
+void SynthEditor::pasteLfoPoints() {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return;
+  if (copied_lfo_points_.empty()) {
+    postLfoAnnouncement("No points copied");
+    return;
+  }
+
+  std::vector<CopiedLfoPoint> source = copied_lfo_points_;
+  std::sort(source.begin(), source.end(), [](const auto& a, const auto& b) {
+    return a.point.first < b.point.first;
+  });
+
+  const float source_start = source.front().point.first;
+  const float source_end = source.back().point.first;
+  const float span = jmax(0.0f, source_end - source_start);
+  const float paste_start = span >= 1.0f ? 0.0f : jlimit(0.0f, 1.0f - span, lfo_cursor_phase_);
+
+  std::vector<CopiedLfoPoint> points;
+  points.reserve(generator->getNumPoints() + static_cast<int>(source.size()));
+  for (int i = 0; i < generator->getNumPoints(); ++i)
+    points.push_back({ generator->getPoint(i), generator->getPower(i) });
+
+  selected_lfo_point_phases_.clear();
+  for (auto point : source) {
+    point.point.first = jlimit(0.0f, 1.0f, paste_start + (point.point.first - source_start));
+    points.erase(std::remove_if(points.begin(), points.end(), [&point](const auto& existing) {
+      return std::abs(existing.point.first - point.point.first) <= 0.0005f;
+    }), points.end());
+    points.push_back(point);
+    selected_lfo_point_phases_.push_back(point.point.first);
+  }
+
+  std::sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+    return a.point.first < b.point.first;
+  });
+  const int count = jmin(static_cast<int>(points.size()), LineGenerator::kMaxPoints);
+
+  synth_.pauseProcessing(true);
+  generator->setNumPoints(count);
+  for (int i = 0; i < count; ++i) {
+    generator->setPoint(i, points[static_cast<size_t>(i)].point);
+    generator->setPower(i, points[static_cast<size_t>(i)].power);
+  }
+  generator->render();
+  synth_.pauseProcessing(false);
+
+  lfo_cursor_phase_ = paste_start;
+  refreshLfoMsegControls();
+  postLfoAnnouncement("Pasted " + String(static_cast<int>(source.size())) + " point" +
+                      (source.size() == 1 ? "" : "s") + " at " + lfoTimeDescription(paste_start));
+}
+
+void SynthEditor::copyLfoShape() {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return;
+
+  copied_lfo_shape_.clear();
+  for (int i = 0; i < generator->getNumPoints(); ++i)
+    copied_lfo_shape_.push_back({ generator->getPoint(i), generator->getPower(i) });
+  postLfoAnnouncement("Copied LFO " + String(active_lfo_index_ + 1));
+}
+
+void SynthEditor::pasteLfoShape() {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return;
+  if (copied_lfo_shape_.empty()) {
+    postLfoAnnouncement("No pattern copied");
+    return;
+  }
+
+  const int count = jmin(static_cast<int>(copied_lfo_shape_.size()), LineGenerator::kMaxPoints);
+  synth_.pauseProcessing(true);
+  generator->setNumPoints(count);
+  for (int i = 0; i < count; ++i) {
+    generator->setPoint(i, copied_lfo_shape_[static_cast<size_t>(i)].point);
+    generator->setPower(i, copied_lfo_shape_[static_cast<size_t>(i)].power);
+  }
+  generator->render();
+  synth_.pauseProcessing(false);
+
+  lfo_cursor_phase_ = 0.0f;
+  selected_lfo_point_phases_.clear();
+  refreshLfoMsegControls();
+  postLfoAnnouncement("Pasted to LFO " + String(active_lfo_index_ + 1));
+}
+
+void SynthEditor::duplicateLfoShapeToNextSlot() {
+  auto* source = activeLfoGenerator();
+  if (source == nullptr)
+    return;
+
+  std::vector<CopiedLfoPoint> duplicate;
+  for (int i = 0; i < source->getNumPoints(); ++i)
+    duplicate.push_back({ source->getPoint(i), source->getPower(i) });
+
+  const int destination = (active_lfo_index_ + 1) % vital::kNumLfos;
+  active_lfo_index_ = destination;
+  if (auto* target = activeLfoGenerator()) {
+    const int count = jmin(static_cast<int>(duplicate.size()), LineGenerator::kMaxPoints);
+    synth_.pauseProcessing(true);
+    target->setNumPoints(count);
+    for (int i = 0; i < count; ++i) {
+      target->setPoint(i, duplicate[static_cast<size_t>(i)].point);
+      target->setPower(i, duplicate[static_cast<size_t>(i)].power);
+    }
+    target->render();
+    synth_.pauseProcessing(false);
+  }
+  lfo_cursor_phase_ = 0.0f;
+  selected_lfo_point_phases_.clear();
+  refreshLfoMsegControls();
+  postLfoAnnouncement("Duplicated to LFO " + String(destination + 1));
 }
 
 void SynthEditor::applyLfoShapePreset() {
@@ -5139,8 +5578,7 @@ void SynthEditor::applyLfoShapePreset() {
   const int shape = lfo_mseg_shape_.getSelectedItemIndex();
   if (shape == 0) {
     synth_.pauseProcessing(false);
-    postPluginAnnouncement("Custom shape selected. No change applied.",
-                                           AccessibilityHandler::AnnouncementPriority::medium);
+    postLfoAnnouncement("Custom shape selected. No change applied.");
     return;
   }
   if (shape == 1)
@@ -5193,9 +5631,7 @@ void SynthEditor::applyLfoShapePreset() {
   synth_.pauseProcessing(false);
 
   refreshLfoMsegControls();
-  postPluginAnnouncement("Applied " + lfo_mseg_shape_.getText() + " to LFO " +
-                                         String(active_lfo_index_ + 1),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement("Applied shape " + lfo_mseg_shape_.getText());
 }
 
 void SynthEditor::addLfoPoint() {
@@ -5209,8 +5645,7 @@ void SynthEditor::addLfoPoint() {
     const float point_time = generator->getPoint(i).first;
     if (std::abs(point_time - lfo_cursor_phase_) <= 0.0005f) {
       lfo_mseg_point_.setSelectedItemIndex(i, sendNotificationSync);
-      postPluginAnnouncement("Point already exists, " + lfoMsegStatusText(),
-                                             AccessibilityHandler::AnnouncementPriority::high);
+      postLfoAnnouncement("Point already exists, " + lfoMsegStatusText());
       return;
     }
     if (point_time > lfo_cursor_phase_) {
@@ -5226,92 +5661,140 @@ void SynthEditor::addLfoPoint() {
   synth_.pauseProcessing(false);
   refreshLfoMsegControls();
   lfo_mseg_point_.setSelectedItemIndex(insert_index, dontSendNotification);
+  selected_lfo_point_phases_.clear();
+  selected_lfo_point_phases_.push_back(lfo_cursor_phase_);
   updateLfoMsegSummary();
-  postPluginAnnouncement("Added point, " + lfoPointDescription(insert_index),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  postLfoAnnouncement("Added point, " + lfoPointDescription(insert_index));
 }
 
 void SynthEditor::deleteLfoPoint() {
   auto* generator = activeLfoGenerator();
-  const int index = selectedLfoPointIndex();
-  if (generator == nullptr || generator->getNumPoints() <= 2 ||
-      !isPositiveAndBelow(index, generator->getNumPoints())) {
-    postPluginAnnouncement("LFO needs at least two points",
-                                           AccessibilityHandler::AnnouncementPriority::medium);
+  auto indices = lfo_multi_selection_mode_ ? selectedLfoPointIndices() : std::vector<int>();
+  const int cursor_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.empty() && cursor_index >= 0)
+    indices.push_back(cursor_index);
+  if (generator == nullptr || indices.empty()) {
+    postLfoAnnouncement("No point at " + lfoTimeDescription(lfo_cursor_phase_));
+    return;
+  }
+  if (generator->getNumPoints() <= 1) {
+    postLfoAnnouncement("No point at " + lfoTimeDescription(lfo_cursor_phase_));
     return;
   }
 
-  const String deleted = lfoPointDescription(index);
+  std::sort(indices.begin(), indices.end(), std::greater<int>());
+  const String deleted = indices.size() == 1 ? lfoPointDescription(indices.front()) : String();
   synth_.pauseProcessing(true);
-  generator->removePoint(index);
+  for (int index : indices) {
+    if (generator->getNumPoints() <= 1)
+      break;
+    generator->removePoint(index);
+  }
   generator->render();
   synth_.pauseProcessing(false);
+  selected_lfo_point_phases_.clear();
   refreshLfoMsegControls();
-  postPluginAnnouncement("Deleted point, " + deleted, AccessibilityHandler::AnnouncementPriority::high);
+  if (indices.size() == 1)
+    postLfoAnnouncement("Deleted point, " + deleted);
+  else
+    postLfoAnnouncement("Deleted " + String(static_cast<int>(indices.size())) + " selected points");
 }
 
 void SynthEditor::moveLfoPointTime(float delta) {
   auto* generator = activeLfoGenerator();
-  const int index = selectedLfoPointIndex();
-  if (generator == nullptr || !isPositiveAndBelow(index, generator->getNumPoints()))
-    return;
-  if (index == 0 || index == generator->getNumPoints() - 1) {
-    postPluginAnnouncement("Start and end point times are fixed",
-                                           AccessibilityHandler::AnnouncementPriority::medium);
+  auto indices = lfo_multi_selection_mode_ ? selectedLfoPointIndices() : std::vector<int>();
+  const int cursor_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.empty() && cursor_index >= 0)
+    indices.push_back(cursor_index);
+  if (generator == nullptr || indices.empty()) {
+    postLfoAnnouncement("No point selected. Press A to add a point at " + lfoTimeDescription(lfo_cursor_phase_));
     return;
   }
 
-  const auto point = generator->getPoint(index);
-  const float min_time = generator->getPoint(index - 1).first + 0.001f;
-  const float max_time = generator->getPoint(index + 1).first - 0.001f;
-  const float new_time = snapLfoPhaseToGrid(jlimit(0.0f, 1.0f, point.first + delta));
+  std::vector<CopiedLfoPoint> points;
+  for (int i = 0; i < generator->getNumPoints(); ++i)
+    points.push_back({ generator->getPoint(i), generator->getPower(i) });
+
+  selected_lfo_point_phases_.clear();
+  for (int index : indices) {
+    points[static_cast<size_t>(index)].point.first =
+        snapLfoPhaseToGrid(jlimit(0.0f, 1.0f, points[static_cast<size_t>(index)].point.first + delta));
+    selected_lfo_point_phases_.push_back(points[static_cast<size_t>(index)].point.first);
+  }
+  std::sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+    return a.point.first < b.point.first;
+  });
   synth_.pauseProcessing(true);
-  generator->setPoint(index, { jlimit(min_time, max_time, new_time), point.second });
+  for (int i = 0; i < static_cast<int>(points.size()); ++i) {
+    generator->setPoint(i, points[static_cast<size_t>(i)].point);
+    generator->setPower(i, points[static_cast<size_t>(i)].power);
+  }
   generator->render();
   synth_.pauseProcessing(false);
+  lfo_cursor_phase_ = selected_lfo_point_phases_.empty() ? lfo_cursor_phase_ : selected_lfo_point_phases_.front();
   refreshLfoMsegControls();
-  lfo_mseg_point_.setSelectedItemIndex(index, dontSendNotification);
-  updateLfoMsegSummary();
-  postPluginAnnouncement("Moved point, " + lfoPointDescription(index),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  const int moved_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.size() == 1 && moved_index >= 0)
+    postLfoAnnouncement("Moved point, " + lfoPointDescription(moved_index));
+  else
+    postLfoAnnouncement("Moved " + String(static_cast<int>(indices.size())) + " selected points");
 }
 
 void SynthEditor::moveLfoPointValue(float delta) {
   auto* generator = activeLfoGenerator();
-  const int index = selectedLfoPointIndex();
-  if (generator == nullptr || !isPositiveAndBelow(index, generator->getNumPoints()))
+  auto indices = lfo_multi_selection_mode_ ? selectedLfoPointIndices() : std::vector<int>();
+  const int cursor_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.empty() && cursor_index >= 0)
+    indices.push_back(cursor_index);
+  if (generator == nullptr || indices.empty()) {
+    postLfoAnnouncement("No point selected. Press A to add a point at " + lfoTimeDescription(lfo_cursor_phase_));
     return;
+  }
 
-  const auto point = generator->getPoint(index);
-  const float output_value = jlimit(0.0f, 1.0f, pointOutputValue(generator, index) + delta);
+  float output_value = 0.0f;
   synth_.pauseProcessing(true);
-  generator->setPoint(index, { point.first, 1.0f - output_value });
+  for (int index : indices) {
+    const auto point = generator->getPoint(index);
+    output_value = jlimit(0.0f, 1.0f, pointOutputValue(generator, index) + delta);
+    generator->setPoint(index, { point.first, 1.0f - output_value });
+  }
   generator->render();
   synth_.pauseProcessing(false);
   refreshLfoMsegControls();
-  lfo_mseg_point_.setSelectedItemIndex(index, dontSendNotification);
-  updateLfoMsegSummary();
-  postPluginAnnouncement("Value " + percentString(output_value) + ", " + lfoPointDescription(index),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  if (indices.size() == 1)
+    postLfoAnnouncement("Value " + percentString(output_value) + ", " + lfoPointDescription(indices.front()));
+  else
+    postLfoAnnouncement("Changed " + String(static_cast<int>(indices.size())) +
+                        " selected points by " + percentString(std::abs(delta)));
 }
 
 void SynthEditor::setLfoPointCurveFromCombo() {
   auto* generator = activeLfoGenerator();
-  const int point_index = selectedLfoPointIndex();
+  auto indices = lfo_multi_selection_mode_ ? selectedLfoPointIndices() : std::vector<int>();
+  const int point_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  if (indices.empty() && point_index >= 0)
+    indices.push_back(point_index);
   if (generator == nullptr || generator->getNumPoints() < 2)
     return;
-  const int curve_point = isPositiveAndBelow(point_index, generator->getNumPoints() - 1)
-      ? point_index : generator->getNumPoints() - 2;
+  if (indices.empty()) {
+    postLfoAnnouncement("No point selected. Press A to add a point at " + lfoTimeDescription(lfo_cursor_phase_));
+    return;
+  }
   const int curve_index = lfo_mseg_curve_.getSelectedItemIndex();
   synth_.pauseProcessing(true);
   generator->setSmooth(smoothForCurveIndex(curve_index));
-  generator->setPower(curve_point, powerForCurveIndex(curve_index));
+  for (int index : indices) {
+    const int curve_point = isPositiveAndBelow(index, generator->getNumPoints() - 1)
+        ? index : generator->getNumPoints() - 2;
+    generator->setPower(curve_point, powerForCurveIndex(curve_index));
+  }
   generator->render();
   synth_.pauseProcessing(false);
   updateLfoMsegSummary();
-  postPluginAnnouncement("Curve " + lfo_mseg_curve_.getText() + ", " +
-                                         lfoPointDescription(curve_point),
-                                         AccessibilityHandler::AnnouncementPriority::high);
+  if (indices.size() == 1)
+    postLfoAnnouncement("Curve " + lfo_mseg_curve_.getText() + ", " + lfoPointDescription(indices.front()));
+  else
+    postLfoAnnouncement("Changed curve for " + String(static_cast<int>(indices.size())) + " selected points");
 }
 
 void SynthEditor::setLfoSmoothFromToggle() {
@@ -6344,6 +6827,46 @@ void SynthEditor::loadWavetableFile(const File& file, int audioLoadStyle) {
   }
 }
 
+void SynthEditor::saveWavetableFile(int oscillator) {
+  if (!isPositiveAndBelow(oscillator, vital::kNumOscillators))
+    return;
+
+  auto* creator = synth_.getWavetableCreator(oscillator);
+  if (creator == nullptr) {
+    postPluginAnnouncement("No wavetable available", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  String name = String(creator->getName()).trim();
+  if (name.isEmpty())
+    name = "Oscillator " + String(oscillator + 1) + " Wavetable";
+  name = name.removeCharacters("\\/:*?\"<>|");
+  if (name.isEmpty())
+    name = "Wavetable";
+
+  wavetable_chooser_ = std::make_unique<FileChooser>("Export Atlas wavetable",
+                                                     LoadSave::getUserWavetableDirectory().getChildFile(name),
+                                                     String("*.") + vital::kWavetableExtension);
+  wavetable_chooser_->launchAsync(FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles |
+                                      FileBrowserComponent::warnAboutOverwriting,
+                                  [this, oscillator](const FileChooser& chooser) {
+    const File file = chooser.getResult();
+    if (file != File()) {
+      if (auto* creator = synth_.getWavetableCreator(oscillator)) {
+        const File destination = file.withFileExtension(vital::kWavetableExtension);
+        const bool saved = destination.replaceWithText(String(creator->stateToJson().dump(2)));
+        if (saved)
+          postPluginAnnouncement("Exported wavetable " + destination.getFileNameWithoutExtension(),
+                                                 AccessibilityHandler::AnnouncementPriority::high);
+        else
+          NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to export wavetable",
+                                                "The wavetable file could not be written.");
+      }
+    }
+    wavetable_chooser_.reset();
+  });
+}
+
 int SynthEditor::wavetableFrameCount(int oscillator) const {
   if (!isPositiveAndBelow(oscillator, vital::kNumOscillators))
     return 1;
@@ -6628,6 +7151,200 @@ void SynthEditor::showSampleBrowserMenu(Component& target, bool granular) {
       return;
 
     loadSampleFile((*choices)[static_cast<size_t>(result - 1)], granular);
+  });
+}
+
+void SynthEditor::chooseLfoPresetFile(int lfoIndex) {
+  if (!isPositiveAndBelow(lfoIndex, vital::kNumLfos))
+    return;
+
+  lfo_chooser_ = std::make_unique<FileChooser>("Import Atlas LFO preset",
+                                               LoadSave::getUserLfoDirectory(), vital::kLfoExtensionsList);
+  lfo_chooser_->launchAsync(FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+                            [this, lfoIndex](const FileChooser& chooser) {
+    const File file = chooser.getResult();
+    if (file.existsAsFile())
+      loadLfoPresetFile(lfoIndex, file);
+    lfo_chooser_.reset();
+  });
+}
+
+void SynthEditor::loadLfoPresetFile(int lfoIndex, const File& file) {
+  if (!isPositiveAndBelow(lfoIndex, vital::kNumLfos) || !file.existsAsFile())
+    return;
+
+  json data = json::parse(file.loadFileAsString().toStdString(), nullptr, false);
+  if (data.is_discarded() || !LineGenerator::isValidJson(data)) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to import LFO preset",
+                                          "The selected file is not a valid Atlas LFO preset.");
+    postPluginAnnouncement("Unable to import LFO preset", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  if (auto* generator = lfoGeneratorForIndex(lfoIndex)) {
+    synth_.pauseProcessing(true);
+    generator->jsonToState(data);
+    generator->setLastBrowsedFile(file.getFullPathName().toStdString());
+    synth_.pauseProcessing(false);
+    if (active_lfo_index_ == lfoIndex)
+      refreshLfoMsegControls();
+    postPluginAnnouncement("Loaded LFO preset " + file.getFileNameWithoutExtension() +
+                                           " into LFO " + String(lfoIndex + 1),
+                                           AccessibilityHandler::AnnouncementPriority::high);
+  }
+}
+
+void SynthEditor::saveLfoPresetFile(int lfoIndex) {
+  if (!isPositiveAndBelow(lfoIndex, vital::kNumLfos))
+    return;
+
+  auto* generator = lfoGeneratorForIndex(lfoIndex);
+  if (generator == nullptr)
+    return;
+
+  String name = String(generator->getName()).trim();
+  if (name.isEmpty())
+    name = "LFO " + String(lfoIndex + 1);
+  name = name.removeCharacters("\\/:*?\"<>|");
+  if (name.isEmpty())
+    name = "LFO";
+
+  lfo_chooser_ = std::make_unique<FileChooser>("Save Atlas LFO preset",
+                                               LoadSave::getUserLfoDirectory().getChildFile(name),
+                                               String("*.") + vital::kLfoExtension);
+  lfo_chooser_->launchAsync(FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles |
+                                FileBrowserComponent::warnAboutOverwriting,
+                            [this, lfoIndex](const FileChooser& chooser) {
+    const File file = chooser.getResult();
+    if (file != File()) {
+      if (auto* generator = lfoGeneratorForIndex(lfoIndex)) {
+        const File destination = file.withFileExtension(vital::kLfoExtension);
+        const bool saved = destination.replaceWithText(String(generator->stateToJson().dump(2)));
+        if (saved)
+          postPluginAnnouncement("Saved LFO preset " + destination.getFileNameWithoutExtension(),
+                                                 AccessibilityHandler::AnnouncementPriority::high);
+        else
+          NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to save LFO preset",
+                                                "The LFO preset could not be written.");
+      }
+    }
+    lfo_chooser_.reset();
+  });
+}
+
+void SynthEditor::chooseEffectPresetFile(const String& sectionName) {
+  if (effectIdForSection(sectionName).isEmpty())
+    return;
+
+  fx_chooser_ = std::make_unique<FileChooser>("Import Atlas FX preset",
+                                              LoadSave::getUserFxDirectory(),
+                                              String("*.") + vital::kFxExtension);
+  fx_chooser_->launchAsync(FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+                           [this, sectionName](const FileChooser& chooser) {
+    const File file = chooser.getResult();
+    if (file.existsAsFile())
+      loadEffectPresetFile(sectionName, file);
+    fx_chooser_.reset();
+  });
+}
+
+void SynthEditor::loadEffectPresetFile(const String& sectionName, const File& file) {
+  const String effect_id = effectIdForSection(sectionName);
+  if (effect_id.isEmpty() || !file.existsAsFile())
+    return;
+
+  json data = json::parse(file.loadFileAsString().toStdString(), nullptr, false);
+  if (data.is_discarded() || !data.count("parameters") || !data["parameters"].is_object()) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to import FX preset",
+                                          "The selected file is not a valid Atlas FX preset.");
+    postPluginAnnouncement("Unable to import FX preset", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  if (data.count("effect") && data["effect"].is_string() &&
+      String(data["effect"].get<std::string>()) != effect_id) {
+    NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Wrong FX preset type",
+                                          "This preset was saved for " +
+                                          effectPresetDisplayName(String(data["effect"].get<std::string>())) +
+                                          ", not " + accessibleSectionTitle(sectionName) + ".");
+    return;
+  }
+
+  const String chain_prefix = effectChainPrefixForSection(sectionName);
+  int changed = 0;
+  for (auto it = data["parameters"].begin(); it != data["parameters"].end(); ++it) {
+    if (!it.value().is_number())
+      continue;
+    const String suffix = it.key();
+    if (!suffix.startsWith(effect_id + "_"))
+      continue;
+    const String target_id = chain_prefix + suffix;
+    if (parameterBridge(target_id) == nullptr)
+      continue;
+    setParameterEngineValue(target_id, it.value().get<float>());
+    ++changed;
+  }
+
+  if (changed == 0) {
+    postPluginAnnouncement("No matching FX parameters found", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  timerCallback();
+  postPluginAnnouncement("Loaded " + accessibleSectionTitle(sectionName) + " FX preset " +
+                                         file.getFileNameWithoutExtension(),
+                                         AccessibilityHandler::AnnouncementPriority::high);
+}
+
+void SynthEditor::saveEffectPresetFile(const String& sectionName) {
+  const String effect_id = effectIdForSection(sectionName);
+  if (effect_id.isEmpty())
+    return;
+
+  const String chain_prefix = effectChainPrefixForSection(sectionName);
+  json parameters = json::object();
+  for (const auto& parameter : parameters_by_id_) {
+    const String id = parameter.first;
+    if (!id.startsWith(chain_prefix + effect_id + "_"))
+      continue;
+    if (parameter.second == nullptr)
+      continue;
+    const String suffix = id.fromFirstOccurrenceOf(chain_prefix, false, false);
+    parameters[suffix.toStdString()] = parameter.second->convertToEngineValue(parameter.second->getValue());
+  }
+
+  if (parameters.empty()) {
+    postPluginAnnouncement("No FX parameters found", AccessibilityHandler::AnnouncementPriority::high);
+    return;
+  }
+
+  String name = accessibleSectionTitle(sectionName).removeCharacters("\\/:*?\"<>|");
+  if (name.isEmpty())
+    name = "FX Preset";
+  fx_chooser_ = std::make_unique<FileChooser>("Save Atlas FX preset",
+                                              LoadSave::getUserFxDirectory().getChildFile(name),
+                                              String("*.") + vital::kFxExtension);
+  fx_chooser_->launchAsync(FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles |
+                               FileBrowserComponent::warnAboutOverwriting,
+                           [this, effect_id, sectionName, parameters](const FileChooser& chooser) {
+    const File file = chooser.getResult();
+    if (file != File()) {
+      json data;
+      data["type"] = "Atlas FX Preset";
+      data["version"] = 1;
+      data["effect"] = effect_id.toStdString();
+      data["name"] = accessibleSectionTitle(sectionName).toStdString();
+      data["parameters"] = parameters;
+      const File destination = file.withFileExtension(vital::kFxExtension);
+      const bool saved = destination.replaceWithText(String(data.dump(2)));
+      if (saved)
+        postPluginAnnouncement("Saved FX preset " + destination.getFileNameWithoutExtension(),
+                                               AccessibilityHandler::AnnouncementPriority::high);
+      else
+        NativeMessageBox::showMessageBoxAsync(MessageBoxIconType::WarningIcon, "Unable to save FX preset",
+                                              "The FX preset could not be written.");
+    }
+    fx_chooser_.reset();
   });
 }
 

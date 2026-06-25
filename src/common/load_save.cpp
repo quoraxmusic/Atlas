@@ -124,6 +124,7 @@ const std::string LoadSave::kWavetableFolderName = "Wavetables";
 const std::string LoadSave::kSkinFolderName = "Skins";
 const std::string LoadSave::kSampleFolderName = "Samples";
 const std::string LoadSave::kLfoFolderName = "LFOs";
+const std::string LoadSave::kFxFolderName = "FX";
 
 const std::string LoadSave::kAdditionalWavetableFoldersName = "wavetable_folders";
 const std::string LoadSave::kAdditionalSampleFoldersName = "sample_folders";
@@ -1952,6 +1953,10 @@ std::vector<File> LoadSave::getLfoDirectories() {
   return getDirectories(kLfoFolderName);
 }
 
+std::vector<File> LoadSave::getFxDirectories() {
+  return getDirectories(kFxFolderName);
+}
+
 File LoadSave::getUserDirectory() {
   File directory = getDataDirectory().getChildFile(kUserDirectoryName);
   if (!directory.exists())
@@ -1994,6 +1999,13 @@ File LoadSave::getUserLfoDirectory() {
   return directory;
 }
 
+File LoadSave::getUserFxDirectory() {
+  File directory = getUserDirectory().getChildFile(kFxFolderName);
+  if (!directory.exists())
+    directory.createDirectory();
+  return directory;
+}
+
 void LoadSave::getAllFilesOfTypeInDirectories(Array<File>& files, const String& extensions,
                                               const std::vector<File>& directories) {
   files.clear();
@@ -2021,6 +2033,10 @@ void LoadSave::getAllLfos(Array<File>& lfos) {
 
 void LoadSave::getAllSamples(Array<File>& samples) {
   getAllFilesOfTypeInDirectories(samples, vital::kSampleExtensionsList, getSampleDirectories());
+}
+
+void LoadSave::getAllFx(Array<File>& fx) {
+  getAllFilesOfTypeInDirectories(fx, String("*.") + vital::kFxExtension, getFxDirectories());
 }
 
 void LoadSave::getAllUserPresets(Array<File>& presets) {
@@ -2053,6 +2069,14 @@ void LoadSave::getAllUserSamples(Array<File>& samples) {
     getUserSampleDirectory()
   };
   getAllFilesOfTypeInDirectories(samples, vital::kSampleExtensionsList, directories);
+}
+
+void LoadSave::getAllUserFx(Array<File>& fx) {
+  std::vector<File> directories = {
+    getDataDirectory().getChildFile(kFxFolderName),
+    getUserFxDirectory()
+  };
+  getAllFilesOfTypeInDirectories(fx, String("*.") + vital::kFxExtension, directories);
 }
 
 int LoadSave::compareFeatureVersionStrings(String a, String b) {

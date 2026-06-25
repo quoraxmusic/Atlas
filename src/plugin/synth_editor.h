@@ -60,7 +60,7 @@ class LfoMsegKeyboardComponent : public Component {
       setWantsKeyboardFocus(true);
       setTitle("LFO Editor");
       setDescription("Keyboard LFO shape editor with time, value, and curve announcements.");
-      setHelpText("Left and right move in time. A adds a point. Shift A applies the selected shape. Backspace clears the shape. Up and Down change value. Shift Left and Shift Right move the point. Command Up and Command Down change curve. Comma and period move between points. G and H cycle shape presets. Semicolon and apostrophe cycle length. Minus and equals change grid. J and L move the current point. I and K change curve. C and V copy and paste points. E deletes a point.");
+      setHelpText("Left and right move in time. Shift 1 through Shift 8 switch LFOs. A adds a point. Shift A applies the selected shape. Backspace clears the active shape. S toggles point selection. R clears point selection. Left bracket and right bracket change value by one percent. Shift brackets change value by five percent. Shift C copies the current shape. Shift V pastes to the current shape. Shift D duplicates to the next LFO slot. Comma and period move between points. I and K change curve. J and L move the current point. G and H cycle shape presets. Semicolon and apostrophe cycle length. Minus makes the grid coarser. Equals makes it finer.");
     }
 
     bool keyPressed(const KeyPress& key) override {
@@ -82,11 +82,18 @@ class LfoMsegKeyboardComponent : public Component {
       class Handler final : public AccessibilityHandler {
         public:
           explicit Handler(LfoMsegKeyboardComponent& component) :
-              AccessibilityHandler(component, AccessibilityRole::group) { }
+              AccessibilityHandler(component, AccessibilityRole::group), component_(component) { }
 
           AccessibleState getCurrentState() const override {
             return AccessibilityHandler::getCurrentState().withAccessibleOffscreen();
           }
+
+          String getDescription() const override {
+            return component_.getStatusText ? component_.getStatusText() : String();
+          }
+
+        private:
+          LfoMsegKeyboardComponent& component_;
       };
       return std::make_unique<Handler>(*this);
     }
@@ -139,6 +146,8 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void loadPresetFile(const File& file, bool preview = false);
     void chooseBankFile();
     void importBankFile(const File& file);
+    void chooseFolderToExportBank();
+    void exportFolderAsBank(const File& sourceFolder, const File& destinationFile);
     void savePresetToUserDirectory();
     void savePresetAs();
     void savePresetFile(const File& file);
@@ -158,6 +167,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void chooseWavetableFile(int audioLoadStyle);
     void loadWavetableFile(const File& file);
     void loadWavetableFile(const File& file, int audioLoadStyle);
+    void saveWavetableFile(int oscillator);
     int wavetableFrameCount(int oscillator) const;
     String wavetableEditorSummary(int oscillator) const;
     void setWavetableEditorVisible(int oscillator, bool visible);
@@ -171,6 +181,12 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void loadSampleFile(const File& file, bool granular = false);
     void showSampleBrowserMenu(Component& target, bool granular = false);
     void loadShiftedSample(int direction, bool granular = false);
+    void chooseLfoPresetFile(int lfoIndex);
+    void loadLfoPresetFile(int lfoIndex, const File& file);
+    void saveLfoPresetFile(int lfoIndex);
+    void chooseEffectPresetFile(const String& sectionName);
+    void loadEffectPresetFile(const String& sectionName, const File& file);
+    void saveEffectPresetFile(const String& sectionName);
     void setEffectChainControlsVisible(bool visible);
     void readEffectChainOrder(const String& sectionName, int* order) const;
     void writeEffectChainOrder(const String& sectionName, const int* order);
@@ -213,17 +229,30 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void stepLfoShapePreset(int direction);
     void stepLfoCycleLength(int direction);
     void stepLfoGrid(int direction);
+    void switchLfoFromShortcut(int lfoIndex);
     void clearLfoShape();
     void applyLfoShapePreset();
     void addLfoPoint();
     void deleteLfoPoint();
     void moveLfoPointTime(float delta);
     void moveLfoPointValue(float delta);
+    void toggleLfoPointSelection();
+    void toggleLfoMultiSelectionMode();
+    void clearLfoPointSelection();
+    void copyLfoPoints();
+    void pasteLfoPoints();
+    void copyLfoShape();
+    void pasteLfoShape();
+    void duplicateLfoShapeToNextSlot();
     void setLfoPointCurveFromCombo();
     void setLfoSmoothFromToggle();
     LineGenerator* lfoGeneratorForIndex(int lfoIndex) const;
     LineGenerator* activeLfoGenerator() const;
     int selectedLfoPointIndex() const;
+    int lfoPointIndexAtPhase(float phase) const;
+    std::vector<int> selectedLfoPointIndices() const;
+    bool isLfoPointSelected(float phase) const;
+    void pruneSelectedLfoPointPhases();
     float lfoCycleQuarterNotes() const;
     float lfoGridQuarterNotes() const;
     float lfoGridAmount() const;
@@ -324,7 +353,13 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     StringArray modulation_destination_all_ids_;
     StringArray modulation_destination_ids_;
     std::vector<vital::ModulationConnection*> modulation_routes_;
-    std::vector<std::pair<float, float>> copied_lfo_points_;
+    struct CopiedLfoPoint {
+      std::pair<float, float> point;
+      float power = 0.0f;
+    };
+    std::vector<CopiedLfoPoint> copied_lfo_points_;
+    std::vector<CopiedLfoPoint> copied_lfo_shape_;
+    std::vector<float> selected_lfo_point_phases_;
     std::vector<File> cached_wavetable_browser_files_;
     std::vector<File> cached_sample_browser_files_;
     std::vector<Component*> focus_order_;
@@ -334,6 +369,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     std::unique_ptr<FileChooser> preset_chooser_;
     std::unique_ptr<FileChooser> wavetable_chooser_;
     std::unique_ptr<FileChooser> sample_chooser_;
+    std::unique_ptr<FileChooser> lfo_chooser_;
+    std::unique_ptr<FileChooser> fx_chooser_;
+    std::unique_ptr<FileChooser> bank_chooser_;
     String pending_modulation_source_;
     String pending_modulation_destination_;
     String pending_parameter_value_id_;
@@ -363,6 +401,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     bool effect_chain_controls_visible_ = false;
     bool modulation_controls_visible_ = false;
     bool lfo_mseg_controls_visible_ = false;
+    bool lfo_multi_selection_mode_ = false;
     bool modulation_amount_prompt_visible_ = false;
     bool parameter_value_prompt_visible_ = false;
 

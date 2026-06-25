@@ -66,6 +66,7 @@ class LoadSave {
     static const std::string kSkinFolderName;
     static const std::string kSampleFolderName;
     static const std::string kLfoFolderName;
+    static const std::string kFxFolderName;
     static const std::string kAdditionalWavetableFoldersName;
     static const std::string kAdditionalSampleFoldersName;
 
@@ -155,12 +156,14 @@ class LoadSave {
     static std::vector<File> getSkinDirectories();
     static std::vector<File> getSampleDirectories();
     static std::vector<File> getLfoDirectories();
+    static std::vector<File> getFxDirectories();
     static File getUserDirectory();
     static File getUserPresetDirectory();
     static File getUserWavetableDirectory();
     static File getUserSkinDirectory();
     static File getUserSampleDirectory();
     static File getUserLfoDirectory();
+    static File getUserFxDirectory();
     static void getAllFilesOfTypeInDirectories(Array<File>& files, const String& extensions,
                                                const std::vector<File>& directories);
     static void getAllPresets(Array<File>& presets);
@@ -168,10 +171,12 @@ class LoadSave {
     static void getAllSkins(Array<File>& skins);
     static void getAllLfos(Array<File>& lfos);
     static void getAllSamples(Array<File>& samples);
+    static void getAllFx(Array<File>& fx);
     static void getAllUserPresets(Array<File>& presets);
     static void getAllUserWavetables(Array<File>& wavetables);
     static void getAllUserLfos(Array<File>& lfos);
     static void getAllUserSamples(Array<File>& samples);
+    static void getAllUserFx(Array<File>& fx);
     static int compareFeatureVersionStrings(String a, String b);
     static int compareVersionStrings(String a, String b);
 

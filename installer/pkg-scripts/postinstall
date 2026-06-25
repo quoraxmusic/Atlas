@@ -19,10 +19,12 @@ guide_destination="$atlas_dir/Accessible Layout Guide.html"
 /bin/mkdir -p "$atlas_dir/Factory/Wavetables"
 /bin/mkdir -p "$atlas_dir/Factory/Samples"
 /bin/mkdir -p "$atlas_dir/Factory/LFOs"
+/bin/mkdir -p "$atlas_dir/Factory/FX"
 /bin/mkdir -p "$atlas_dir/User/Presets"
 /bin/mkdir -p "$atlas_dir/User/Wavetables"
 /bin/mkdir -p "$atlas_dir/User/Samples"
 /bin/mkdir -p "$atlas_dir/User/LFOs"
+/bin/mkdir -p "$atlas_dir/User/FX"
 
 if [[ -f "$guide_source" ]]; then
   /bin/cp "$guide_source" "$guide_destination"
