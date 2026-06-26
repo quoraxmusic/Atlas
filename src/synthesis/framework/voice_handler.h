@@ -359,6 +359,7 @@ namespace vital {
 
       force_inline Output* voice_event() { return &voice_event_; }
       force_inline Output* retrigger() { return &retrigger_; }
+      force_inline Output* modulation_retrigger() { return &modulation_retrigger_; }
       force_inline Output* reset() { return &reset_; }
       force_inline Output* note() { return &note_; }
       force_inline Output* last_note() { return &last_note_; }
@@ -459,6 +460,7 @@ namespace vital {
 
       cr::Output voice_event_;
       cr::Output retrigger_;
+      cr::Output modulation_retrigger_;
       cr::Output reset_;
       cr::Output note_;
       cr::Output last_note_;

@@ -26,7 +26,8 @@ namespace vital {
   Envelope::Envelope() :
       Processor(kNumInputs, kNumOutputs), current_value_(0.0f),
       position_(0.0f), value_(0.0f), poly_state_(0.0f), start_value_(0.0f),
-      attack_power_(0.0f), decay_power_(0.0f), release_power_(0.0f), sustain_(0.0f) { }
+      attack_power_(0.0f), decay_power_(0.0f), release_power_(0.0f), sustain_(0.0f),
+      retrigger_from_zero_(false) { }
 
   void Envelope::process(int num_samples) {
     if (isControlRate())
@@ -50,6 +51,8 @@ namespace vital {
     poly_int triggered_remaining = poly_int(num_samples) - input(kTrigger)->source->trigger_offset;
     poly_int remaining_samples = utils::maskLoad(num_samples, triggered_remaining, trigger_mask);
     start_value_ = utils::maskLoad(start_value_, value_, trigger_mask);
+    if (retrigger_from_zero_)
+      start_value_ = utils::maskLoad(start_value_, 0.0f, trigger_mask & note_on_mask);
     poly_mask released_retrigger_mask = trigger_mask & note_on_mask &
                                         poly_float::equal(previous_state, kVoiceKill);
     start_value_ = utils::maskLoad(start_value_, 0.0f, released_retrigger_mask);
@@ -194,6 +197,8 @@ namespace vital {
       current_position = utils::maskLoad(current_position, 0.0f, triggering);
 
       start_value_ = utils::maskLoad(start_value_, value_, triggering);
+      if (retrigger_from_zero_)
+        start_value_ = utils::maskLoad(start_value_, 0.0f, triggering & note_on_mask);
       poly_mask released_retrigger_mask = triggering & note_on_mask &
                                           poly_float::equal(previous_state, kVoiceKill);
       start_value_ = utils::maskLoad(start_value_, 0.0f, released_retrigger_mask);

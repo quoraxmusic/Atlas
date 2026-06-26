@@ -54,4 +54,8 @@ namespace vital {
     envelope_->plug(decay_power, Envelope::kDecayPower);
     envelope_->plug(release_power, Envelope::kReleasePower);
   }
+
+  void EnvelopeModule::setRetriggerFromZero(bool retrigger_from_zero) {
+    envelope_->setRetriggerFromZero(retrigger_from_zero);
+  }
 } // namespace vital

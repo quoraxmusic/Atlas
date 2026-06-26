@@ -39,6 +39,7 @@ namespace vital {
 
       void init() override;
       virtual Processor* clone() const override { return new EnvelopeModule(*this); }
+      void setRetriggerFromZero(bool retrigger_from_zero);
 
       void setControlRate(bool control_rate) override { 
         if (!force_audio_rate_)

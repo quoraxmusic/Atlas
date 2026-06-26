@@ -48,6 +48,7 @@ namespace vital {
 
       virtual Processor* clone() const override { return new Envelope(*this); }
       virtual void process(int num_samples) override;
+      void setRetriggerFromZero(bool retrigger_from_zero) { retrigger_from_zero_ = retrigger_from_zero; }
 
     private:
       void processControlRate(int num_samples);
@@ -69,6 +70,7 @@ namespace vital {
       poly_float decay_power_;
       poly_float release_power_;
       poly_float sustain_;
+      bool retrigger_from_zero_;
 
       JUCE_LEAK_DETECTOR(Envelope)
   };

@@ -196,7 +196,8 @@ namespace vital {
     for (int i = 0; i < kNumEnvelopes; ++i) {
       std::string prefix = std::string("env_") + std::to_string(i + 1);
       EnvelopeModule* envelope = new EnvelopeModule(prefix, i == 0);
-      envelope->plug(retrigger(), EnvelopeModule::kTrigger);
+      envelope->setRetriggerFromZero(i != 0);
+      envelope->plug(i == 0 ? retrigger() : modulation_retrigger(), EnvelopeModule::kTrigger);
       addSubmodule(envelope);
       addProcessor(envelope);
       envelopes_[i] = envelope;

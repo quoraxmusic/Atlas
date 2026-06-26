@@ -92,6 +92,7 @@ namespace vital {
 
     voice_event_.owner = &voice_router_;
     retrigger_.owner = &voice_router_;
+    modulation_retrigger_.owner = &voice_router_;
     reset_.owner = &voice_router_;
     note_.owner = &voice_router_;
     last_note_.owner = &voice_router_;
@@ -124,6 +125,7 @@ namespace vital {
     lift_.clearTrigger();
     voice_event_.clearTrigger();
     retrigger_.clearTrigger();
+    modulation_retrigger_.clearTrigger();
     reset_.clearTrigger();
     aftertouch_.clearTrigger();
     slide_.clearTrigger();
@@ -152,6 +154,7 @@ namespace vital {
 
           if (!legato_ || voice->last_key_state() != Voice::kHeld || voice->state().event != kVoiceOn)
             retrigger_.trigger(mask, voice->state().event, offset);
+          modulation_retrigger_.trigger(mask, voice->state().event, offset);
 
           voice->completeVoiceEvent();
         }
