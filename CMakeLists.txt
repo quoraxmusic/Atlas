@@ -77,3 +77,28 @@ target_link_libraries(Atlas PRIVATE
   juce::juce_gui_extra
   PUBLIC
   juce::juce_recommended_config_flags)
+
+if(WIN32)
+  set(ATLAS_ISS "${CMAKE_SOURCE_DIR}/installer/Atlas.iss")
+
+  find_program(ISCC_EXECUTABLE ISCC
+    HINTS "C:/Program Files (x86)/Inno Setup 6"
+    DOC "Inno Setup compiler (ISCC.exe)")
+
+  if(ISCC_EXECUTABLE)
+    add_custom_target(AtlasInstaller
+      COMMENT "Building Atlas Windows installer"
+      DEPENDS Atlas_VST3
+      COMMAND "${ISCC_EXECUTABLE}"
+        "/DAppVersion=${PROJECT_VERSION}"
+        "/DSourceRoot=${CMAKE_SOURCE_DIR}"
+        "/DBuildDir=${CMAKE_BINARY_DIR}"
+        "${ATLAS_ISS}"
+      VERBATIM)
+  else()
+    message(WARNING
+      "ISCC.exe not found — AtlasInstaller target is disabled. "
+      "Install Inno Setup and ensure ISCC.exe is on PATH, "
+      "or re-run CMake after installing it.")
+  endif()
+endif()
