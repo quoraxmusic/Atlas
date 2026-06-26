@@ -1143,6 +1143,14 @@ namespace {
            CharacterFunctions::toLowerCase(key.getTextCharacter()) == 'c';
   }
 
+  // The right bracket key acts as a "context menu" modifier on every platform so
+  // that Windows screen reader users (and anyone without VoiceOver) can open the
+  // same menu that VoiceOver exposes through VO+Shift+M (the showMenu action).
+  bool isContextMenuKey(const KeyPress& key) {
+    return !key.getModifiers().isAnyModifierKeyDown() &&
+           (key.getKeyCode() == ']' || key.getTextCharacter() == ']');
+  }
+
   int macroIndexForControlId(const String& id) {
     if (!id.startsWith("macro_control_"))
       return -1;
@@ -1575,10 +1583,18 @@ namespace {
       const std::vector<Component*>& children_;
   };
 
+  // Implemented by the offscreen controls so that the accessibility handlers
+  // (VoiceOver VO+Shift+M -> showMenu) and the key handlers (the right bracket
+  // key) can trigger the control's context menu through a common entry point.
+  struct AccessibleContextMenuTarget {
+    virtual ~AccessibleContextMenuTarget() = default;
+    virtual void showAccessibleContextMenu() = 0;
+  };
+
   class OffscreenSliderAccessibilityHandler final : public AccessibilityHandler {
     public:
       explicit OffscreenSliderAccessibilityHandler(Slider& sliderToWrap) :
-          AccessibilityHandler(sliderToWrap, AccessibilityRole::slider, AccessibilityActions{},
+          AccessibilityHandler(sliderToWrap, AccessibilityRole::slider, contextMenuActions(sliderToWrap),
                                AccessibilityHandler::Interfaces{std::make_unique<ValueInterface>(sliderToWrap)}),
           slider_(sliderToWrap) { }
 
@@ -1589,6 +1605,13 @@ namespace {
       String getHelp() const override { return slider_.getTooltip(); }
 
     private:
+      static AccessibilityActions contextMenuActions(Slider& slider) {
+        return AccessibilityActions().addAction(AccessibilityActionType::showMenu, [&slider] {
+          if (auto* menu_target = dynamic_cast<AccessibleContextMenuTarget*>(&slider))
+            menu_target->showAccessibleContextMenu();
+        });
+      }
+
       class ValueInterface final : public AccessibilityValueInterface {
         public:
           explicit ValueInterface(Slider& sliderToWrap) :
@@ -1677,6 +1700,12 @@ namespace {
               button.setToggleState(!button.getToggleState(), sendNotification);
           });
         }
+        if (dynamic_cast<AccessibleContextMenuTarget*>(&button)) {
+          actions = actions.addAction(AccessibilityActionType::showMenu, [&button] {
+            if (auto* menu_target = dynamic_cast<AccessibleContextMenuTarget*>(&button))
+              menu_target->showAccessibleContextMenu();
+          });
+        }
         return actions;
       }
 
@@ -1741,15 +1770,25 @@ namespace {
       }
   };
 
-  class OffscreenSlider : public Slider {
+  class OffscreenSlider : public Slider, public AccessibleContextMenuTarget {
     public:
       std::function<bool(const KeyPress&, Component&)> onAccessibleCommand;
       std::function<void(Component&)> onTextEntryCommand;
       std::function<void()> onDefaultCommand;
+      std::function<void()> onContextMenuCommand;
+
+      void showAccessibleContextMenu() override {
+        if (onContextMenuCommand)
+          onContextMenuCommand();
+      }
 
       bool keyPressed(const KeyPress& key) override {
         if (onAccessibleCommand && onAccessibleCommand(key, *this))
           return true;
+        if (onContextMenuCommand && isContextMenuKey(key)) {
+          onContextMenuCommand();
+          return true;
+        }
         if (key.getKeyCode() == KeyPress::returnKey) {
           if (onTextEntryCommand)
             onTextEntryCommand(*this);
@@ -1758,6 +1797,23 @@ namespace {
         if (key.getKeyCode() == KeyPress::backspaceKey || key.getKeyCode() == KeyPress::deleteKey) {
           if (onDefaultCommand)
             onDefaultCommand();
+          if (auto* handler = getAccessibilityHandler())
+            handler->notifyAccessibilityEvent(AccessibilityEvent::valueChanged);
+          return true;
+        }
+
+        if (key.getKeyCode() == KeyPress::homeKey) {
+          Slider::ScopedDragNotification drag(*this);
+          setValue(getMaximum(), sendNotificationSync);
+          if (auto* handler = getAccessibilityHandler())
+            handler->notifyAccessibilityEvent(AccessibilityEvent::valueChanged);
+          return true;
+        }
+        if (key.getKeyCode() == KeyPress::endKey) {
+          Slider::ScopedDragNotification drag(*this);
+          setValue(getMinimum(), sendNotificationSync);
+          if (auto* handler = getAccessibilityHandler())
+            handler->notifyAccessibilityEvent(AccessibilityEvent::valueChanged);
           return true;
         }
 
@@ -1785,13 +1841,23 @@ namespace {
       }
   };
 
-  class OffscreenToggleButton : public ToggleButton {
+  class OffscreenToggleButton : public ToggleButton, public AccessibleContextMenuTarget {
     public:
       std::function<bool(const KeyPress&, Component&)> onAccessibleCommand;
+      std::function<void()> onContextMenuCommand;
+
+      void showAccessibleContextMenu() override {
+        if (onContextMenuCommand)
+          onContextMenuCommand();
+      }
 
       bool keyPressed(const KeyPress& key) override {
         if (onAccessibleCommand && onAccessibleCommand(key, *this))
           return true;
+        if (onContextMenuCommand && isContextMenuKey(key)) {
+          onContextMenuCommand();
+          return true;
+        }
         return ToggleButton::keyPressed(key);
       }
 
@@ -1901,13 +1967,14 @@ class AccessibleParameterRow : public Component {
           toggle_.getProperties().set("accessibleOffText", accessibleOffText);
         if (accessibleOnText.isNotEmpty())
           toggle_.getProperties().set("accessibleOnText", accessibleOnText);
-        toggle_.setHelpText("Press Space to toggle. Press Shift M for modulation, Shift L for MIDI learn, or Shift C to clear MIDI learn.");
+        toggle_.setHelpText("Press Space to toggle. Press Shift M for modulation, Shift L for MIDI learn, or Shift C to clear MIDI learn. Press the right bracket key, or VoiceOver Shift M, for the context menu.");
         toggle_.setWantsKeyboardFocus(true);
         toggle_.onClick = [this] {
           parameter_.beginChangeGesture();
           parameter_.setValueNotifyingHost(toggle_.getToggleState() ? 1.0f : 0.0f);
           parameter_.endChangeGesture();
         };
+        toggle_.onContextMenuCommand = [this] { showContextMenu(toggle_); };
         addAndMakeVisible(toggle_);
       }
       else {
@@ -1921,7 +1988,7 @@ class AccessibleParameterRow : public Component {
                                                                   : (random_rate ? "Adjust free-running random modulation period"
                                                                                  : "Adjust " + accessible_name));
         slider_.setHelpText(random_rate ? "In free mode this controls how long each random cycle lasts. In synced mode use Tempo."
-                                        : "Use arrows for changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default, Shift M for modulation, Shift L for MIDI learn, and Shift C to clear MIDI learn");
+                                        : "Use arrows for changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default, Shift M for modulation, Shift L for MIDI learn, and Shift C to clear MIDI learn. Press the right bracket key, or VoiceOver Shift M, for the context menu.");
         slider_.setWantsKeyboardFocus(true);
         slider_.textFromValueFunction = [this](double value) {
           if (text_from_value_)
@@ -1938,6 +2005,7 @@ class AccessibleParameterRow : public Component {
             parameter_.setValueNotifyingHost(static_cast<float>(slider_.getValue()));
         };
         slider_.onDefaultCommand = [this] { resetToDefaultValue(); };
+        slider_.onContextMenuCommand = [this] { showContextMenu(slider_); };
         addAndMakeVisible(slider_);
       }
       refresh();
@@ -2000,6 +2068,83 @@ class AccessibleParameterRow : public Component {
     }
 
   private:
+    enum ContextMenuAction {
+      kContextTypeValue = 1,
+      kContextResetDefault,
+      kContextAddModulation,
+      kContextMidiLearn,
+      kContextClearMidi,
+      kContextRenameMacro,
+      kContextToggleBipolar,
+    };
+
+    void showContextMenu(Component& target) {
+      auto* bridge = dynamic_cast<ValueBridge*>(&parameter_);
+      const String parameter_id = bridge != nullptr ? bridge->getParameterId() : String();
+      if (parameter_id.isEmpty())
+        return;
+
+      const bool is_toggle = parameter_.isBoolean();
+      const int macro_index = macroIndexForControlId(parameter_id);
+
+      PopupMenu menu;
+      menu.addSectionHeader(parameter_.getName(128));
+      if (!is_toggle && slider_.onTextEntryCommand)
+        menu.addItem(kContextTypeValue, "Type a value\xe2\x80\xa6");
+      menu.addItem(kContextResetDefault, "Reset to default");
+      if (modulation_menu_callback_)
+        menu.addItem(kContextAddModulation, "Add modulation source\xe2\x80\xa6");
+      if (midi_learn_callback_) {
+        menu.addItem(kContextMidiLearn, "MIDI learn");
+        menu.addItem(kContextClearMidi, "Clear MIDI learn");
+      }
+      if (macro_index >= 0) {
+        menu.addItem(kContextRenameMacro, "Rename macro\xe2\x80\xa6");
+        menu.addItem(kContextToggleBipolar, "Toggle bipolar range");
+      }
+
+      Component::SafePointer<Component> safe_target(&target);
+      menu.showMenuAsync(PopupMenu::Options().withTargetComponent(&target),
+                         [this, parameter_id, safe_target](int result) {
+        Component* invoked = safe_target.getComponent();
+        if (invoked == nullptr)
+          return;
+
+        switch (result) {
+          case kContextTypeValue:
+            if (slider_.onTextEntryCommand)
+              slider_.onTextEntryCommand(*invoked);
+            break;
+          case kContextResetDefault:
+            resetToDefaultValue();
+            break;
+          case kContextAddModulation:
+            if (modulation_menu_callback_)
+              modulation_menu_callback_(parameter_id, *invoked);
+            break;
+          case kContextMidiLearn:
+            if (midi_learn_callback_)
+              midi_learn_callback_(parameter_id, *invoked, false);
+            break;
+          case kContextClearMidi:
+            if (midi_learn_callback_)
+              midi_learn_callback_(parameter_id, *invoked, true);
+            break;
+          case kContextRenameMacro:
+            if (extra_command_callback_)
+              extra_command_callback_(parameter_id,
+                                      KeyPress(KeyPress::returnKey, ModifierKeys::shiftModifier, 0), *invoked);
+            break;
+          case kContextToggleBipolar:
+            if (extra_command_callback_)
+              extra_command_callback_(parameter_id, KeyPress('b', ModifierKeys(), 'b'), *invoked);
+            break;
+          default:
+            break;
+        }
+      });
+    }
+
     void resetToDefaultValue() {
       const float default_value = jlimit(static_cast<float>(min_normalized_value_),
                                         static_cast<float>(max_normalized_value_),
@@ -7497,6 +7642,9 @@ bool SynthEditor::focusGroupShortcut(const String& group, const String& fallback
       if (component != nullptr && component->getTitle() == group) {
         ensureComponentVisible(component);
         component->grabKeyboardFocus();
+        const int group_index = group_names_.indexOf(group);
+        if (group_index >= 0)
+          group_selector_.setSelectedItemIndex(group_index, dontSendNotification);
         postPluginAnnouncement(group, AccessibilityHandler::AnnouncementPriority::high);
         return true;
       }
@@ -7541,6 +7689,16 @@ bool SynthEditor::focusShortcutTarget(const KeyPress& key) {
     case 'z': return focusGroupShortcut("Zones");
     case 'g': return focusSectionShortcut("Master and global");
     default: break;
+  }
+
+  if (key.getKeyCode() >= '1' && key.getKeyCode() <= '9') {
+    const int index = key.getKeyCode() - '1';
+    const String group = group_selector_.getText();
+    const auto found = group_sections_.find(group);
+    if (found != group_sections_.end() && isPositiveAndBelow(index, found->second.size())) {
+      selectSectionByName(found->second[index], true);
+      return true;
+    }
   }
 
   return false;
