@@ -124,6 +124,7 @@ namespace vital {
 
       enum {
         kReset,
+        kRetrigger,
         kVoiceEvent,
         kMidi,
         kKeytrack,
@@ -148,6 +149,7 @@ namespace vital {
         kHighCutoff,
         kPan,
         kNoteCount,
+        kNotePressed,
         kNumInputs
       };
 
@@ -191,6 +193,7 @@ namespace vital {
       poly_mask bounce_mask_;
       poly_float low_cut_state_;
       poly_float high_cut_state_;
+      poly_float last_output_;
       std::shared_ptr<cr::Output> phase_output_;
       utils::RandomGenerator random_generator_;
 

@@ -19,6 +19,7 @@
 #include "one_pole_filter.h"
 #include "synth_constants.h"
 
+#include <algorithm>
 #include <thread>
 
 namespace vital {
@@ -392,6 +393,7 @@ namespace vital {
     global_sample_fraction_ = 0.0f;
     low_cut_state_ = 0.0f;
     high_cut_state_ = 0.0f;
+    last_output_ = 0.0f;
 
     sample_ = std::make_shared<Sample>();
     phase_output_ = std::make_shared<cr::Output>();
@@ -449,22 +451,27 @@ namespace vital {
     loop_crossfade = utils::min(loop_crossfade, loop_length * 0.5f);
 
     poly_mask reset_mask = getResetMask(kReset);
-    poly_mask voice_event_mask = getResetMask(kVoiceEvent);
+    poly_mask retrigger_mask = getResetMask(kRetrigger);
     int playback_mode = static_cast<int>(input(kPlaybackMode)->at(0)[0] + 0.5f);
     playback_mode = utils::iclamp(playback_mode, 0, kNumPlaybackModes - 1);
-    poly_mask sample_reset_mask = playback_mode == kRetriggerPerNote ? voice_event_mask : poly_mask(0);
-    poly_float reset_offset = utils::toFloat(input(kVoiceEvent)->source->trigger_offset);
+    poly_mask sample_reset_mask = playback_mode == kRetriggerPerNote ? retrigger_mask : poly_mask(0);
+    poly_mask hard_sample_reset_mask = sample_reset_mask & reset_mask;
+    poly_mask soft_sample_reset_mask = sample_reset_mask & ~reset_mask;
+    poly_int retrigger_offset = input(kRetrigger)->source->trigger_offset;
+    poly_float reset_offset = utils::toFloat(retrigger_offset);
     current_pan_amplitude = utils::maskLoad(current_pan_amplitude, pan_amplitude_, reset_mask);
-    current_phase_inc = utils::maskLoad(current_phase_inc, phase_inc_, reset_mask | sample_reset_mask);
-    bounce_mask_ = bounce_mask_ & ~sample_reset_mask;
+    current_phase_inc = utils::maskLoad(current_phase_inc, phase_inc_, reset_mask | hard_sample_reset_mask);
+    bounce_mask_ = bounce_mask_ & ~hard_sample_reset_mask;
     reset_offset *= current_phase_inc;
     
     poly_float reset_value = sample_start - reset_offset;
+    poly_float soft_reset_value = sample_start;
     if (input(kRandomPhase)->at(0)[0]) {
       reset_value = sample_start + (sample_end - sample_start) * random_generator_.next();
       reset_value = utils::maskLoad(reset_value,
                                     sample_start + (sample_end - sample_start) * random_generator_.next(),
                                     constants::kFirstMask);
+      soft_reset_value = reset_value;
       reset_value -= reset_offset;
     }
     
@@ -473,13 +480,13 @@ namespace vital {
       sample_fraction_ = global_sample_fraction_;
     }
 
-    sample_index_ = utils::maskLoad(sample_index_, utils::floor(reset_value), sample_reset_mask);
-    sample_fraction_ = utils::maskLoad(sample_fraction_, reset_value - sample_index_, sample_reset_mask);
+    sample_index_ = utils::maskLoad(sample_index_, utils::floor(reset_value), hard_sample_reset_mask);
+    sample_fraction_ = utils::maskLoad(sample_fraction_, reset_value - sample_index_, hard_sample_reset_mask);
     sample_index_ = utils::maskLoad(utils::clamp(sample_index_, sample_start, sample_end), sample_index_,
-                                    sample_reset_mask);
+                                    hard_sample_reset_mask);
     sample_fraction_ = utils::clamp(sample_fraction_, 0.0f, 1.0f);
-    low_cut_state_ = utils::maskLoad(low_cut_state_, 0.0f, sample_reset_mask);
-    high_cut_state_ = utils::maskLoad(high_cut_state_, 0.0f, sample_reset_mask);
+    low_cut_state_ = utils::maskLoad(low_cut_state_, 0.0f, reset_mask);
+    high_cut_state_ = utils::maskLoad(high_cut_state_, 0.0f, reset_mask);
 
     bool loop = input(kLoop)->at(0)[0] != 0.0f;
     poly_mask loop_enabled_mask = 0;
@@ -520,12 +527,21 @@ namespace vital {
     poly_float* raw_output = output(kRaw)->buffer;
     poly_float current_fraction = sample_fraction_;
     poly_float current_index = utils::maskLoad(utils::clamp(sample_index_, sample_start, sample_end), sample_index_,
-                                              sample_reset_mask);
+                                              hard_sample_reset_mask);
 
     poly_mask current_bounce = bounce_mask_;
     poly_float active_start = loop ? loop_start : sample_start;
     poly_float active_end = loop ? loop_end : sample_end;
     for (int i = 0; i < num_samples; ++i) {
+      poly_mask soft_trigger_mask = soft_sample_reset_mask & poly_int::equal(i, retrigger_offset);
+      if (soft_trigger_mask.anyMask()) {
+        poly_float reset_index = utils::floor(soft_reset_value);
+        current_index = utils::maskLoad(current_index, reset_index, soft_trigger_mask);
+        current_fraction = utils::maskLoad(current_fraction, soft_reset_value - reset_index, soft_trigger_mask);
+        current_phase_inc = utils::maskLoad(current_phase_inc, phase_inc_, soft_trigger_mask);
+        current_bounce = current_bounce & ~soft_trigger_mask;
+      }
+
       current_phase_inc += delta_phase_inc;
 
       poly_mask playing_mask = loop_enabled_mask | poly_float::lessThan(current_index, active_end) | current_bounce;
@@ -588,8 +604,8 @@ namespace vital {
     bounce_mask_ = current_bounce;
     if (reset_mask.anyMask())
       clearOutputBufferForReset(reset_mask, kReset, kRaw);
-    if (sample_reset_mask.anyMask())
-      clearOutputBufferForReset(sample_reset_mask, kVoiceEvent, kRaw);
+    if (hard_sample_reset_mask.anyMask())
+      clearOutputBufferForReset(hard_sample_reset_mask, kRetrigger, kRaw);
 
     poly_float low_cutoff = utils::clamp(input(kLowCutoff)->at(0), 8.0f, 136.0f);
     poly_float high_cutoff = utils::clamp(input(kHighCutoff)->at(0), 8.0f, 136.0f);
@@ -606,6 +622,27 @@ namespace vital {
       raw_output[i] = utils::maskLoad(sample_value, high, use_high_cut);
     }
 
+    if (soft_sample_reset_mask.anyMask()) {
+      static constexpr mono_float kSampleRetriggerFadeSeconds = 0.003f;
+      const int fade_samples = std::max(1, static_cast<int>(kSampleRetriggerFadeSeconds * getSampleRate()));
+      for (int lane = 0; lane < poly_float::kSize; ++lane) {
+        if (!soft_sample_reset_mask[lane])
+          continue;
+
+        const int start = std::min(num_samples, std::max(0, static_cast<int>(retrigger_offset[lane])));
+        if (start >= num_samples)
+          continue;
+
+        const int end = std::min(num_samples, start + fade_samples);
+        const mono_float previous_output = start > 0 ? raw_output[start - 1][lane] : last_output_[lane];
+        const mono_float correction = previous_output - raw_output[start][lane];
+        for (int i = start; i < end; ++i) {
+          mono_float fade = 1.0f - (i - start + 1.0f) / fade_samples;
+          raw_output[i].set(lane, raw_output[i][lane] + correction * fade);
+        }
+      }
+    }
+
     const poly_float* level_input = input(kLevel)->source->buffer;
     poly_float* levelled_output = output(kLevelled)->buffer;
     poly_float zero = 0.0f;
@@ -615,6 +652,9 @@ namespace vital {
       poly_float level = utils::clamp(level_input[i], zero, max);
       levelled_output[i] = current_pan_amplitude * level * level * raw_output[i];
     }
+
+    if (num_samples > 0)
+      last_output_ = raw_output[num_samples - 1];
 
     sample_index_ = current_index;
     sample_fraction_ = current_fraction;

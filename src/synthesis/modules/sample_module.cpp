@@ -50,9 +50,11 @@ namespace vital {
     Output* pan = createPolyModControl("sample_pan");
 
     sampler_->useInput(input(kReset), SampleSource::kReset);
+    sampler_->useInput(input(kRetrigger), SampleSource::kRetrigger);
     sampler_->useInput(input(kVoiceEvent), SampleSource::kVoiceEvent);
     sampler_->useInput(input(kMidi), SampleSource::kMidi);
     sampler_->useInput(input(kNoteCount), SampleSource::kNoteCount);
+    sampler_->useInput(input(kNotePressed), SampleSource::kNotePressed);
     sampler_->plug(random_phase, SampleSource::kRandomPhase);
     sampler_->plug(keytrack, SampleSource::kKeytrack);
     sampler_->plug(root_key, SampleSource::kRootKey);

@@ -72,8 +72,10 @@ namespace vital {
     sample_velocity_zone_start_ = createBaseControl("sample_velocity_zone_start");
     sample_velocity_zone_end_ = createBaseControl("sample_velocity_zone_end");
     sampler_->useInput(input(kReset), SampleModule::kReset);
+    sampler_->useInput(input(kRetrigger), SampleModule::kRetrigger);
     sampler_->useInput(input(kVoiceEvent), SampleModule::kVoiceEvent);
     sampler_->useInput(input(kNoteCount), SampleModule::kNoteCount);
+    sampler_->useInput(input(kNotePressed), SampleModule::kNotePressed);
     sampler_->useInput(input(kMidi), SampleModule::kMidi);
 
     granular_destination_ = createBaseControl("granular_destination");

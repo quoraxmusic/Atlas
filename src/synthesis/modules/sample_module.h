@@ -24,9 +24,11 @@ namespace vital {
     public:
       enum {
         kReset,
+        kRetrigger,
         kVoiceEvent,
         kMidi,
         kNoteCount,
+        kNotePressed,
         kNumInputs
       };
 
