@@ -40,5 +40,7 @@ dist.zip
 Debug
 Profile
 Release
+dist/
 .claude/
 CLAUDE.md                                                                                                       
+*.exe
