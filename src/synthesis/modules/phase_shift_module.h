@@ -66,6 +66,7 @@ namespace vital {
       std::array<std::vector<float>, kChannels> input_ring_;
       std::array<std::vector<float>, kChannels> output_ring_;
       std::array<std::vector<std::complex<float>>, kChannels> fft_buffers_;
+      std::array<std::vector<std::complex<float>>, kChannels> fft_work_buffers_;
       std::array<std::vector<std::complex<float>>, kChannels> spectral_history_;
       int input_write_;
       int output_read_;

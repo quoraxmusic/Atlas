@@ -33,6 +33,7 @@ namespace vital {
       input_ring_[channel].assign(kFftSize, 0.0f);
       output_ring_[channel].assign(kOutputRingSize, 0.0f);
       fft_buffers_[channel].assign(kFftSize, std::complex<float>());
+      fft_work_buffers_[channel].assign(kFftSize, std::complex<float>());
       spectral_history_[channel].assign(kHistorySize * kFftSize, std::complex<float>());
     }
   }
@@ -54,6 +55,8 @@ namespace vital {
     for (int channel = 0; channel < kChannels; ++channel) {
       std::fill(input_ring_[channel].begin(), input_ring_[channel].end(), 0.0f);
       std::fill(output_ring_[channel].begin(), output_ring_[channel].end(), 0.0f);
+      std::fill(fft_buffers_[channel].begin(), fft_buffers_[channel].end(), std::complex<float>());
+      std::fill(fft_work_buffers_[channel].begin(), fft_work_buffers_[channel].end(), std::complex<float>());
       std::fill(spectral_history_[channel].begin(), spectral_history_[channel].end(), std::complex<float>());
     }
 
@@ -129,17 +132,18 @@ namespace vital {
   void PhaseShiftModule::processFrame(mono_float depth_frames, mono_float tone) {
     for (int channel = 0; channel < kChannels; ++channel) {
       std::vector<std::complex<float>>& spectrum = fft_buffers_[channel];
+      std::vector<std::complex<float>>& fft_work = fft_work_buffers_[channel];
       std::vector<float>& input = input_ring_[channel];
 
       for (int i = 0; i < kFftSize; ++i) {
         int read_index = (input_write_ + i) % kFftSize;
-        spectrum[i] = { input[read_index] * window_[i], 0.0f };
+        fft_work[i] = { input[read_index] * window_[i], 0.0f };
       }
 
-      fft_.perform(spectrum.data(), spectrum.data(), false);
+      fft_.perform(fft_work.data(), spectrum.data(), false);
       delaySpectrum(channel, spectrum, depth_frames, tone);
-      fft_.perform(spectrum.data(), spectrum.data(), true);
-      addFrameToOutput(channel, spectrum);
+      fft_.perform(spectrum.data(), fft_work.data(), true);
+      addFrameToOutput(channel, fft_work);
     }
 
     history_write_frame_ = (history_write_frame_ + 1) % kHistorySize;

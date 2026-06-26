@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
-project(Atlas VERSION 1.3.0 LANGUAGES C CXX OBJC OBJCXX)
+
+set(ATLAS_PROJECT_LANGUAGES C CXX)
+set(ATLAS_PLUGIN_FORMATS VST3)
+
+if(APPLE)
+  list(APPEND ATLAS_PROJECT_LANGUAGES OBJC OBJCXX)
+  list(APPEND ATLAS_PLUGIN_FORMATS AU)
+endif()
+
+project(Atlas VERSION 1.3.0 LANGUAGES ${ATLAS_PROJECT_LANGUAGES})
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -15,7 +24,7 @@ juce_add_plugin(Atlas
   BUNDLE_ID "plugins.alessio.atlas"
   PLUGIN_MANUFACTURER_CODE Alss
   PLUGIN_CODE Atls
-  FORMATS AU VST3
+  FORMATS ${ATLAS_PLUGIN_FORMATS}
   PRODUCT_NAME "Atlas"
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
@@ -60,7 +69,7 @@ target_compile_definitions(Atlas PRIVATE
 # production build enables fast floating-point transforms for this code, but
 # applying that flag to JUCE itself would weaken JUCE's NaN/Inf handling.
 set_source_files_properties(src/unity_build/synthesis.cpp PROPERTIES
-  COMPILE_OPTIONS "$<$<CONFIG:Release>:-ffast-math>")
+  COMPILE_OPTIONS "$<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/fp:fast>;$<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-ffast-math>")
 
 target_link_libraries(Atlas PRIVATE
   juce::juce_audio_utils
