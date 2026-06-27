@@ -52,6 +52,7 @@ Atlas includes:
 * 6 envelopes
 * 4 random modulators
 * 16 renamable macros
+
 The modulation system is designed to give enough flexibility for complex patches while keeping the controls reachable and understandable through keyboard and screen reader workflows.
 
 ## Effects
