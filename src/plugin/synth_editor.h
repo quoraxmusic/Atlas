@@ -140,7 +140,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void savePatchAsDefault();
     File defaultPatchFile() const;
     void rebuildFocusOrder();
-    void refreshPresetList();
+    void refreshPresetList(bool announce = true);
     void populatePresetFilters();
     void filterPresetList();
     void showPresetMenu();

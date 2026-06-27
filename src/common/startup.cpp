@@ -27,9 +27,6 @@ void Startup::doStartupChecks(MidiManager* midi_manager, vital::StringLayout* la
     LoadSave::saveVersionConfig();
 
   LoadSave::loadConfig(midi_manager, layout);
-
-  if (LoadSave::shouldScanDownloads())
-    LoadSave::scanDownloadsForPresets();
 }
 
 bool Startup::isComputerCompatible() {

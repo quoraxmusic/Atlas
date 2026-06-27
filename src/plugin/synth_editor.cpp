@@ -2996,7 +2996,15 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   addAndMakeVisible(viewport_);
 
   buildSections();
-  refreshPresetList();
+  refreshPresetList(false);
+
+  // Announce Downloads-folder imports once, only when this instance actually
+  // copied new presets (not on every editor/FX-chain open).
+  int imported = synth_.takeDownloadedPresetsImported();
+  if (imported > 0)
+    postPluginAnnouncement("Imported " + String(imported) + " new presets from Downloads folder",
+                           AccessibilityHandler::AnnouncementPriority::high);
+
   group_selector_.setVisible(!show_all_sections_);
   section_selector_.setVisible(!show_all_sections_);
   String initial_section = last_section_name;
@@ -4883,7 +4891,7 @@ void SynthEditor::setPresetControlsVisible(bool visible) {
   resized();
 }
 
-void SynthEditor::refreshPresetList() {
+void SynthEditor::refreshPresetList(bool announce) {
   all_presets_.clear();
   LoadSave::getAllPresets(all_presets_);
   LoadSave::FileSorterAscending sorter;
@@ -4891,8 +4899,9 @@ void SynthEditor::refreshPresetList() {
   populatePresetFilters();
   filterPresetList();
   updatePresetSummary();
-  postPluginAnnouncement("Preset list refreshed, " + String(all_presets_.size()) + " presets found",
-                                         AccessibilityHandler::AnnouncementPriority::medium);
+  if (announce)
+    postPluginAnnouncement("Preset list refreshed, " + String(all_presets_.size()) + " presets found",
+                                           AccessibilityHandler::AnnouncementPriority::medium);
 }
 
 void SynthEditor::populatePresetFilters() {
@@ -5048,10 +5057,11 @@ void SynthEditor::toggleScanDownloads() {
 
   if (enabled) {
     int imported = LoadSave::scanDownloadsForPresets();
-    refreshPresetList();
-    postPluginAnnouncement("Scan Downloads folder for presets on startup on, " + String(imported) +
-                               " new presets imported",
-                           AccessibilityHandler::AnnouncementPriority::high);
+    refreshPresetList(false);
+    String message = "Scan Downloads folder for presets on startup on";
+    if (imported > 0)
+      message += ", " + String(imported) + " new presets imported";
+    postPluginAnnouncement(message, AccessibilityHandler::AnnouncementPriority::high);
   }
   else {
     postPluginAnnouncement("Scan Downloads folder for presets on startup off",

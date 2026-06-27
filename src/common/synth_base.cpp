@@ -66,6 +66,11 @@ SynthBase::SynthBase() : expired_(false) {
   controls_ = engine_->getControls();
 
   Startup::doStartupChecks(midi_manager_.get());
+
+  // Scan the Downloads folder once per plugin instance, recording how many new
+  // presets were imported so the editor can announce it a single time.
+  if (LoadSave::shouldScanDownloads())
+    downloaded_presets_imported_ = LoadSave::scanDownloadsForPresets();
 }
 
 SynthBase::~SynthBase() { }
