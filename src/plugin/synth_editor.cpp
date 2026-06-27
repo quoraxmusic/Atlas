@@ -2128,6 +2128,18 @@ class AccessibleParameterRow : public Component {
       updateAccessibleCommand();
     }
 
+    void setModulationDestinationPredicate(std::function<bool(const String&)> predicate) {
+      is_modulation_destination_ = std::move(predicate);
+      updateAccessibleCommand();
+    }
+
+    void setModulationRemovalCallbacks(std::function<std::vector<std::pair<String, String>>(const String&)> sources,
+                                       std::function<void(const String&, const String&, Component&)> remove) {
+      modulation_removal_sources_callback_ = std::move(sources);
+      modulation_remove_callback_ = std::move(remove);
+      updateAccessibleCommand();
+    }
+
     void setValueEntryCallback(std::function<void(const String&, Component&)> callback) {
       auto* bridge = dynamic_cast<ValueBridge*>(&parameter_);
       const String parameter_id = bridge != nullptr ? bridge->getParameterId() : String();
@@ -2183,7 +2195,14 @@ class AccessibleParameterRow : public Component {
       kContextClearMidi,
       kContextRenameMacro,
       kContextToggleBipolar,
+      kContextRemoveModulationBase = 1000,
     };
+
+    bool canAddModulation(const String& parameter_id) const {
+      if (!modulation_menu_callback_ || parameter_id.isEmpty())
+        return false;
+      return !is_modulation_destination_ || is_modulation_destination_(parameter_id);
+    }
 
     void showContextMenu(Component& target) {
       auto* bridge = dynamic_cast<ValueBridge*>(&parameter_);
@@ -2193,14 +2212,20 @@ class AccessibleParameterRow : public Component {
 
       const bool is_toggle = parameter_.isBoolean();
       const int macro_index = macroIndexForControlId(parameter_id);
+      const auto removable_modulations = modulation_removal_sources_callback_
+          ? modulation_removal_sources_callback_(parameter_id)
+          : std::vector<std::pair<String, String>>();
 
       PopupMenu menu;
       menu.addSectionHeader(parameter_.getName(128));
       if (!is_toggle && slider_.onTextEntryCommand)
         menu.addItem(kContextTypeValue, "Type a value\xe2\x80\xa6");
       menu.addItem(kContextResetDefault, "Reset to default");
-      if (modulation_menu_callback_)
+      if (canAddModulation(parameter_id))
         menu.addItem(kContextAddModulation, "Add modulation source\xe2\x80\xa6");
+      for (int i = 0; i < static_cast<int>(removable_modulations.size()); ++i)
+        menu.addItem(kContextRemoveModulationBase + i,
+                     "Remove modulation from " + removable_modulations[static_cast<size_t>(i)].second);
       if (midi_learn_callback_) {
         menu.addItem(kContextMidiLearn, "MIDI learn");
         menu.addItem(kContextClearMidi, "Clear MIDI learn");
@@ -2212,10 +2237,19 @@ class AccessibleParameterRow : public Component {
 
       Component::SafePointer<Component> safe_target(&target);
       menu.showMenuAsync(PopupMenu::Options().withTargetComponent(&target),
-                         [this, parameter_id, safe_target](int result) {
+                         [this, parameter_id, removable_modulations, safe_target](int result) {
         Component* invoked = safe_target.getComponent();
         if (invoked == nullptr)
           return;
+
+        if (result >= kContextRemoveModulationBase) {
+          const int index = result - kContextRemoveModulationBase;
+          if (modulation_remove_callback_ &&
+              isPositiveAndBelow(index, static_cast<int>(removable_modulations.size())))
+            modulation_remove_callback_(removable_modulations[static_cast<size_t>(index)].first,
+                                        parameter_id, *invoked);
+          return;
+        }
 
         switch (result) {
           case kContextTypeValue:
@@ -2226,7 +2260,7 @@ class AccessibleParameterRow : public Component {
             resetToDefaultValue();
             break;
           case kContextAddModulation:
-            if (modulation_menu_callback_)
+            if (canAddModulation(parameter_id))
               modulation_menu_callback_(parameter_id, *invoked);
             break;
           case kContextMidiLearn:
@@ -2271,6 +2305,9 @@ class AccessibleParameterRow : public Component {
     OffscreenToggleButton toggle_;
     std::function<String(double)> text_from_value_;
     std::function<void(const String&, Component&)> modulation_menu_callback_;
+    std::function<bool(const String&)> is_modulation_destination_;
+    std::function<std::vector<std::pair<String, String>>(const String&)> modulation_removal_sources_callback_;
+    std::function<void(const String&, const String&, Component&)> modulation_remove_callback_;
     std::function<void(const String&, Component&, bool)> midi_learn_callback_;
     std::function<bool(const String&, const KeyPress&, Component&)> extra_command_callback_;
     double min_normalized_value_ = 0.0;
@@ -2288,8 +2325,8 @@ class AccessibleParameterRow : public Component {
         if (extra_command_callback_ && extra_command_callback_(parameter_id, key, target))
           return true;
 
-        if (isModulationMenuKey(key) && modulation_menu_callback_) {
-          modulation_menu_callback_(parameter_id, target);
+        if (isModulationMenuKey(key)) {
+          showContextMenu(target);
           return true;
         }
 
@@ -2976,6 +3013,19 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
 
   lfo_mseg_keyboard_.onKeyPressed = [this](const KeyPress& key) { return handleLfoMsegShortcut(key); };
   lfo_mseg_keyboard_.getStatusText = [this] { return lfoMsegStatusText(); };
+  auto handle_lfo_combo_point_shortcut = [this](const KeyPress& key) {
+    const juce_wchar character = CharacterFunctions::toLowerCase(key.getTextCharacter());
+    if (character == ',' || character == '.')
+      return handleLfoMsegShortcut(key);
+    return false;
+  };
+  lfo_mseg_lfo_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_mode_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_cycle_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_grid_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_shape_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_point_.onKeyPressed = handle_lfo_combo_point_shortcut;
+  lfo_mseg_curve_.onKeyPressed = handle_lfo_combo_point_shortcut;
   addChildComponent(lfo_mseg_keyboard_);
 
   viewport_.setTitle("Section controls");
@@ -3876,6 +3926,12 @@ void SynthEditor::showSection(int index, bool announce) {
     row->setModulationMenuCallback([this](const String& destinationId, Component& target) {
       showModulationSourceMenuForParameter(destinationId, target);
     });
+    row->setModulationDestinationPredicate([this](const String& id) { return isModulationDestinationId(id); });
+    row->setModulationRemovalCallbacks(
+        [this](const String& destinationId) { return modulationSourcesForDestination(destinationId); },
+        [this](const String& sourceId, const String& destinationId, Component& target) {
+          removeModulationFromParameter(sourceId, destinationId, target);
+        });
     row->setMidiLearnCallback([this](const String& parameterId, Component&, bool clear) {
       if (clear) {
         synth_.clearMidiLearn(parameterId.toStdString());
@@ -4035,6 +4091,12 @@ void SynthEditor::showAllSections(bool announce) {
             row->setModulationMenuCallback([this](const String& destinationId, Component& target) {
               showModulationSourceMenuForParameter(destinationId, target);
             });
+            row->setModulationDestinationPredicate([this](const String& id) { return isModulationDestinationId(id); });
+            row->setModulationRemovalCallbacks(
+                [this](const String& destinationId) { return modulationSourcesForDestination(destinationId); },
+                [this](const String& sourceId, const String& destinationId, Component& target) {
+                  removeModulationFromParameter(sourceId, destinationId, target);
+                });
             row->setMidiLearnCallback([this](const String& parameterId, Component&, bool clear) {
               if (clear) {
                 synth_.clearMidiLearn(parameterId.toStdString());
@@ -4373,6 +4435,12 @@ void SynthEditor::showAllSections(bool announce) {
         row->setModulationMenuCallback([this](const String& destinationId, Component& target) {
           showModulationSourceMenuForParameter(destinationId, target);
         });
+        row->setModulationDestinationPredicate([this](const String& id) { return isModulationDestinationId(id); });
+        row->setModulationRemovalCallbacks(
+            [this](const String& destinationId) { return modulationSourcesForDestination(destinationId); },
+            [this](const String& sourceId, const String& destinationId, Component& target) {
+              removeModulationFromParameter(sourceId, destinationId, target);
+            });
         row->setMidiLearnCallback([this](const String& parameterId, Component&, bool clear) {
           if (clear) {
             synth_.clearMidiLearn(parameterId.toStdString());
@@ -4777,6 +4845,40 @@ String SynthEditor::modulationDestinationsForSource(const String& sourceId) cons
     destinations.add(destination + " " + amount_text);
   }
   return destinations.joinIntoString(", ");
+}
+
+std::vector<std::pair<String, String>> SynthEditor::modulationSourcesForDestination(const String& destinationId) const {
+  std::vector<std::pair<String, String>> sources;
+  StringArray seen_sources;
+  for (auto* route : synth_.getModulationConnections()) {
+    if (route == nullptr || route->source_name.empty() || route->destination_name != destinationId.toStdString())
+      continue;
+
+    const String source_id(route->source_name);
+    if (seen_sources.contains(source_id))
+      continue;
+
+    seen_sources.add(source_id);
+    sources.push_back({ source_id, modulationSourceLabelForId(source_id) });
+  }
+
+  std::sort(sources.begin(), sources.end(), [](const auto& a, const auto& b) {
+    return a.second.compareNatural(b.second) < 0;
+  });
+  return sources;
+}
+
+void SynthEditor::removeModulationFromParameter(const String& sourceId, const String& destinationId, Component& target) {
+  if (sourceId.isEmpty() || destinationId.isEmpty())
+    return;
+
+  const String source_label = modulationSourceLabelForId(sourceId);
+  const String destination_label = modulationDestinationLabelForId(destinationId);
+  synth_.disconnectModulation(sourceId.toStdString(), destinationId.toStdString());
+  refreshModulationRoutes();
+  target.grabKeyboardFocus();
+  postPluginAnnouncement("Removed modulation from " + source_label + " to " + destination_label,
+                                         AccessibilityHandler::AnnouncementPriority::high);
 }
 
 String SynthEditor::modulationSlotTitle(int slot) const {
@@ -5269,6 +5371,13 @@ void SynthEditor::savePresetFile(const File& file) {
                                          AccessibilityHandler::AnnouncementPriority::high);
 }
 
+bool SynthEditor::isModulationDestinationId(const String& id) const {
+  // Only parameters registered with the engine as modulation destinations can be connected.
+  // Plain base controls (e.g. the envelope power sliders) have no destination, so offering to
+  // modulate them would connect to a null destination and crash on the audio thread.
+  return synth_.getEngine()->getMonoModulationDestination(id.toStdString()) != nullptr;
+}
+
 void SynthEditor::populateModulationDestinations() {
   modulation_destination_all_ids_.clear();
   modulation_destination_groups_.clear();
@@ -5369,6 +5478,19 @@ int SynthEditor::lfoPointIndexAtPhase(float phase) const {
   return -1;
 }
 
+int SynthEditor::currentLfoPointIndex() const {
+  auto* generator = activeLfoGenerator();
+  if (generator == nullptr)
+    return -1;
+
+  const int selected = selectedLfoPointIndex();
+  if (isPositiveAndBelow(selected, generator->getNumPoints()) &&
+      std::abs(generator->getPoint(selected).first - lfo_cursor_phase_) <= 0.0005f)
+    return selected;
+
+  return lfoPointIndexAtPhase(lfo_cursor_phase_);
+}
+
 bool SynthEditor::isLfoPointSelected(float phase) const {
   return std::any_of(selected_lfo_point_phases_.begin(), selected_lfo_point_phases_.end(),
                      [phase](float selected) { return std::abs(selected - phase) <= 0.0005f; });
@@ -5441,8 +5563,8 @@ String SynthEditor::lfoPointDescriptionFor(int lfoIndex, int pointIndex) const {
       ? generator->getPower(pointIndex)
       : generator->getPower(jmax(0, pointIndex - 1));
   return lfoTimeDescription(point.first) +
-         ", value " + percentString(1.0f - point.second) +
-         ", curve " + curveNameForIndex(curveIndexForPower(power, generator->smooth()));
+         ", " + percentString(1.0f - point.second) +
+         ", " + curveNameForIndex(curveIndexForPower(power, generator->smooth()));
 }
 
 String SynthEditor::lfoTimeDescription(float phase) const {
@@ -5462,9 +5584,9 @@ String SynthEditor::lfoMsegStatusTextFor(int lfoIndex) const {
   auto* generator = lfoGeneratorForIndex(lfoIndex);
   if (generator == nullptr)
     return "LFO editor unavailable";
-  const int selected = lfoIndex == active_lfo_index_ ? lfoPointIndexAtPhase(lfo_cursor_phase_) : 0;
+  const int selected = lfoIndex == active_lfo_index_ ? currentLfoPointIndex() : 0;
   if (isPositiveAndBelow(selected, generator->getNumPoints()))
-    return lfoPointDescriptionFor(lfoIndex, selected) + ", grid " + String(msegTimeDivisions()[lfo_grid_index_].name);
+    return lfoPointDescriptionFor(lfoIndex, selected) + ", " + String(msegTimeDivisions()[lfo_grid_index_].name);
   return lfoTimeDescription(lfo_cursor_phase_) + ", value " +
          percentString(generator->valueAtPhase(lfo_cursor_phase_)) + ", no point, grid " +
          String(msegTimeDivisions()[lfo_grid_index_].name);
@@ -5561,7 +5683,7 @@ void SynthEditor::updateLfoMsegSummary() {
   auto* generator = activeLfoGenerator();
   String summary = "Accessible MSEG editor unavailable";
   if (generator) {
-    const int point_index = lfoPointIndexAtPhase(lfo_cursor_phase_);
+    const int point_index = currentLfoPointIndex();
     summary = "Editing LFO " + String(active_lfo_index_ + 1) +
               ", " + String(generator->getNumPoints()) + " points";
     if (isPositiveAndBelow(point_index, generator->getNumPoints()))
@@ -5604,7 +5726,7 @@ void SynthEditor::moveToLfoPoint(int direction) {
 
   const float tolerance = 0.0005f;
   int next = -1;
-  const int current = lfoPointIndexAtPhase(lfo_cursor_phase_);
+  const int current = currentLfoPointIndex();
 
   if (current >= 0) {
     next = jlimit(0, generator->getNumPoints() - 1, current + direction);
@@ -5630,12 +5752,12 @@ void SynthEditor::moveToLfoPoint(int direction) {
       next = 0;
   }
 
-  lfo_mseg_point_.setSelectedItemIndex(next, sendNotificationSync);
   lfo_cursor_phase_ = generator->getPoint(next).first;
   if (!lfo_multi_selection_mode_) {
     selected_lfo_point_phases_.clear();
     selected_lfo_point_phases_.push_back(lfo_cursor_phase_);
   }
+  lfo_mseg_point_.setSelectedItemIndex(next, sendNotificationSync);
   postLfoAnnouncement(lfoMsegStatusText());
 }
 
@@ -7015,6 +7137,12 @@ void SynthEditor::showSelectedModulationParameters() {
     control->setModulationMenuCallback([this](const String& destinationId, Component& target) {
       showModulationSourceMenuForParameter(destinationId, target);
     });
+    control->setModulationDestinationPredicate([this](const String& id) { return isModulationDestinationId(id); });
+    control->setModulationRemovalCallbacks(
+        [this](const String& destinationId) { return modulationSourcesForDestination(destinationId); },
+        [this](const String& sourceId, const String& destinationId, Component& target) {
+          removeModulationFromParameter(sourceId, destinationId, target);
+        });
     control->setMidiLearnCallback([this](const String& parameterId, Component&, bool clear) {
       if (clear) {
         synth_.clearMidiLearn(parameterId.toStdString());

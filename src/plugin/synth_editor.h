@@ -41,6 +41,14 @@ class PresetComboBox : public ComboBox {
 
 class AccessibleComboBox : public ComboBox {
   public:
+    std::function<bool(const KeyPress&)> onKeyPressed;
+
+    bool keyPressed(const KeyPress& key) override {
+      if (onKeyPressed && onKeyPressed(key))
+        return true;
+      return ComboBox::keyPressed(key);
+    }
+
     std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 };
 
@@ -220,6 +228,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void setModulationControlsVisible(bool visible);
     void populateModulationDestinations();
     void updateModulationDestinationList();
+    bool isModulationDestinationId(const String& id) const;
+    std::vector<std::pair<String, String>> modulationSourcesForDestination(const String& destinationId) const;
+    void removeModulationFromParameter(const String& sourceId, const String& destinationId, Component& target);
     void setLfoMsegControlsVisible(bool visible);
     void refreshLfoMsegControls();
     void updateLfoPointSelector();
@@ -254,6 +265,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     LineGenerator* activeLfoGenerator() const;
     int selectedLfoPointIndex() const;
     int lfoPointIndexAtPhase(float phase) const;
+    int currentLfoPointIndex() const;
     std::vector<int> selectedLfoPointIndices() const;
     bool isLfoPointSelected(float phase) const;
     void pruneSelectedLfoPointPhases();
@@ -326,20 +338,20 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     TextButton modulation_amount_ok_ { "OK" };
     TextButton modulation_amount_cancel_ { "Cancel" };
     Label lfo_mseg_summary_;
-    ComboBox lfo_mseg_lfo_;
-    ComboBox lfo_mseg_mode_;
-    ComboBox lfo_mseg_cycle_;
-    ComboBox lfo_mseg_grid_;
-    ComboBox lfo_mseg_shape_;
+    AccessibleComboBox lfo_mseg_lfo_;
+    AccessibleComboBox lfo_mseg_mode_;
+    AccessibleComboBox lfo_mseg_cycle_;
+    AccessibleComboBox lfo_mseg_grid_;
+    AccessibleComboBox lfo_mseg_shape_;
     TextButton lfo_mseg_apply_shape_ { "Apply shape" };
-    ComboBox lfo_mseg_point_;
+    AccessibleComboBox lfo_mseg_point_;
     TextButton lfo_mseg_add_point_ { "Add point" };
     TextButton lfo_mseg_delete_point_ { "Delete point" };
     TextButton lfo_mseg_time_down_ { "Time earlier" };
     TextButton lfo_mseg_time_up_ { "Time later" };
     TextButton lfo_mseg_value_down_ { "Value down" };
     TextButton lfo_mseg_value_up_ { "Value up" };
-    ComboBox lfo_mseg_curve_;
+    AccessibleComboBox lfo_mseg_curve_;
     ToggleButton lfo_mseg_smooth_ { "Smooth MSEG" };
     LfoMsegKeyboardComponent lfo_mseg_keyboard_;
     Viewport viewport_;
