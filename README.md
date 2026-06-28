@@ -1,18 +1,26 @@
 # Atlas
 
-Atlas is an accessible software synthesizer based on the open source code of Vital.
+Atlas is an accessible software synthesizer based on the open source code of [Vital.](https://github.com/mtytel/vital)
 
-The goal of Atlas is to keep the power and flexibility of Vital while making the instrument fully usable with screen readers on both Windows and macOS. It adds keyboard focused workflows, accessible editing tools, and several new synthesis, modulation, routing, and effects features.
+The goal of Atlas is to keep the power and flexibility of Vital while making the instrument fully usable with screen readers on both Windows and macOS. It adds a  keyboard focused UI, accessible editing tools, and several new synthesis, modulation, routing, and effects features.
 
 ## Main Features
 
-Atlas includes 4 wavetable oscillators, improved sample oscillators, a granular oscillator, expanded modulation, more effects, and a more flexible routing system.
+Atlas includes 4 wavetable oscillators, an improved sample oscillator, a granular oscillator, expanded modulation, more effects, and a more flexible routing system.
 
-The sample oscillator include control over sample start and end points, retrigger behavior, high cut and low cut filters, and looping windows.
+The sample oscillator includes control over sample start and end points, retrigger behavior, high and low cut filters, and looping windows.
 
 The granular oscillator includes 2 playback modes, playthrough and manual.
 
-Atlas also expands the modulation system with 8 LFOs, 6 envelopes, 4 random modulators, and 16 macros. Macros can be renamed, making it easier to organize patches and performance controls.
+Atlas also expands the modulation system with 8 LFOs, 6 envelopes, 4 random modulators, and 16 macros. Macros can be renamed as well.
+
+## Oscillators
+
+Atlas includes 4 wavetable oscillators.
+
+It also includes an improved sample oscillator with additional controls for start position, end position, retrigger modes, filtering, and loop windows.
+
+The granular oscillator adds another sound source with playthrough and manual playback modes.
 
 ## Accessibility
 
@@ -26,7 +34,7 @@ The LFO editor can be used fully from the keyboard.
 
 You can add and remove points, select multiple points, make non continuous selections, change point values, adjust curves between points, move points in time, change LFO smoothing, set LFO timing in synced or free mode, and adjust the starting phase.
 
-The goal is to make detailed LFO design possible for screen reader users without reducing the depth of the original workflow.
+The goal is to make detailed LFO design possible for screen reader users without reducing the depth of the original LFO system.
 
 ## Accessible Wavetable Editor
 
@@ -36,25 +44,14 @@ You can adjust harmonics, change harmonic intensity, remove the fundamental, set
 
 This makes it possible to shape wavetables directly without needing to rely on visual editing.
 
-## Oscillators
-
-Atlas includes 4 wavetable oscillators.
-
-It also includes improved sample oscillators with additional controls for start position, end position, retrigger modes, filtering, and loop windows.
-
-The granular oscillator adds another sound source with playthrough and manual playback modes.
-
 ## Modulation
 
 Atlas includes:
 
-8 LFOs
-
-6 envelopes
-
-4 random modulators
-
-16 renamable macros
+* 8 LFOs
+* 6 envelopes
+* 4 random modulators
+* 16 renamable macros
 
 The modulation system is designed to give enough flexibility for complex patches while keeping the controls reachable and understandable through keyboard and screen reader workflows.
 
@@ -63,36 +60,22 @@ The modulation system is designed to give enough flexibility for complex patches
 Atlas includes 14 effects in total.
 
 It includes Vital's 9 stock effects:
-
-Delay
-
-Chorus
-
-Compressor
-
-EQ
-
-Filter
-
-Flanger
-
-Phaser
-
-Distortion
-
-Reverb
+* Delay
+* Chorus
+* Compressor
+* EQ
+* Filter
+* Flanger
+* Phaser
+* Distortion
+* Reverb
 
 Atlas also adds:
-
-Frequency shifter
-
-Limiter
-
-Utility
-
-Phase shift, inspired by disperser style phase processing
-
-Dimension expander
+* Frequency shifter
+* Limiter
+* Utility
+* Phase shift (inspired by disperser style phase processing)
+* Dimension expander
 
 The Utility effect includes control over input gain, output gain, filtering, and stereo width.
 
