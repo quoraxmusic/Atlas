@@ -20,8 +20,8 @@
 namespace vital {
 
   ModulationConnectionProcessor::ModulationConnectionProcessor(int index) :
-      SynthModule(kNumInputs, kNumOutputs), index_(index), polyphonic_(true), process_when_idle_(false),
-      current_value_(nullptr), bipolar_(nullptr), stereo_(nullptr) {
+      SynthModule(kNumInputs, kNumOutputs), index_(index), polyphonic_(true), collapse_polyphonic_source_(false),
+      process_when_idle_(false), current_value_(nullptr), bipolar_(nullptr), stereo_(nullptr) {
     setControlRate(true);
 
     modulation_amount_ = 0.0f;

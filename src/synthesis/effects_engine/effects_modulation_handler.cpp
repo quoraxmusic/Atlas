@@ -29,7 +29,17 @@
 #include "value_switch.h"
 #include "modulation_connection_processor.h"
 
+#include <cmath>
+
 namespace vital {
+  namespace {
+    poly_float strongestMonoLane(poly_float values, poly_mask mask) {
+      poly_float masked = values & mask;
+      const mono_float maximum = utils::maxFloat(masked);
+      const mono_float minimum = utils::minFloat(masked);
+      return poly_float(std::abs(minimum) > std::abs(maximum) ? minimum : maximum);
+    }
+  }
 
   EffectsModulationHandler::EffectsModulationHandler(Output* beats_per_second) :
       VoiceHandler(0, 1, true), beats_per_second_(beats_per_second),
@@ -258,8 +268,13 @@ namespace vital {
         ModulationConnectionProcessor* processor = modulation_bank_.atIndex(i)->modulation_processor.get();
         if (processor->enabled()) {
           poly_float* buffer = processor->output()->buffer;
-          poly_float masked_value = buffer[0] & voice_mask;
-          buffer[0] = masked_value + utils::swapVoices(masked_value);
+          if (processor->collapsesPolyphonicSource()) {
+            buffer[0] = strongestMonoLane(buffer[0], voice_mask);
+          }
+          else {
+            poly_float masked_value = buffer[0] & voice_mask;
+            buffer[0] = masked_value + utils::swapVoices(masked_value);
+          }
         }
       }
       for (auto& status_source : data_->status_outputs)

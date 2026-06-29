@@ -21,14 +21,37 @@
 #include "synth_gui_interface.h"
 
 #include <map>
+#include <unordered_map>
+#include <vector>
 
 class AccessibleParameterRow;
 class LineGenerator;
 class ValueBridge;
 
+struct PresetBrowserItem {
+  File file;
+  int64 file_size = 0;
+  int64 modified_time = 0;
+  String library;
+  String bank;
+  String category;
+  StringArray tags;
+  String author;
+  String style;
+  String label;
+  String searchable;
+};
+
 class PresetComboBox : public ComboBox {
   public:
     std::function<void()> onReturnKey;
+    std::function<void()> onFocusGained;
+
+    void focusGained(FocusChangeType cause) override {
+      ComboBox::focusGained(cause);
+      if (onFocusGained)
+        onFocusGained();
+    }
 
     bool keyPressed(const KeyPress& key) override {
       if (key.getKeyCode() == KeyPress::returnKey && onReturnKey) {
@@ -42,6 +65,13 @@ class PresetComboBox : public ComboBox {
 class AccessibleComboBox : public ComboBox {
   public:
     std::function<bool(const KeyPress&)> onKeyPressed;
+    std::function<void()> onFocusGained;
+
+    void focusGained(FocusChangeType cause) override {
+      ComboBox::focusGained(cause);
+      if (onFocusGained)
+        onFocusGained();
+    }
 
     bool keyPressed(const KeyPress& key) override {
       if (onKeyPressed && onKeyPressed(key))
@@ -148,15 +178,20 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void savePatchAsDefault();
     File defaultPatchFile() const;
     void rebuildFocusOrder();
+    void ensurePresetListLoaded();
+    void startPresetListLoad(bool announce, bool forceRefresh = false);
+    void applyPresetList(std::vector<PresetBrowserItem> items, bool announce, int generation);
+    const PresetBrowserItem* presetItemForFile(const File& file) const;
     void refreshPresetList(bool announce = true);
     void populatePresetFilters();
     void filterPresetList();
+    void schedulePresetFilterUpdate(bool rebuildFilters);
     void showPresetMenu();
     void toggleScanDownloads();
     void selectPresetFile(const File& file);
     void loadSelectedPreset();
     void choosePresetFile();
-    void loadPresetFile(const File& file, bool preview = false);
+    void loadPresetFile(const File& file, bool preview = false, bool updateBrowserFilters = false);
     void chooseBankFile();
     void importBankFile(const File& file);
     void chooseFolderToExportBank();
@@ -289,7 +324,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     String lfoTimeDescription(float phase) const;
     String lfoMsegStatusTextFor(int lfoIndex) const;
     String modulationDestinationsForSource(const String& sourceId) const;
+    String modulationSlotHeaderTitle(int slot) const;
     String modulationSlotTitle(int slot) const;
+    String modulationControlTitle(const String& parameterId) const;
     void announceModulationSummary();
     bool focusShortcutTarget(const KeyPress& key);
     bool focusGroupShortcut(const String& group, const String& fallbackSection = {});
@@ -313,9 +350,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     ComboBox section_selector_;
     Label preset_summary_;
     TextButton preset_menu_ { "Preset menu" };
-    ComboBox preset_library_;
-    ComboBox preset_bank_;
-    ComboBox preset_category_;
+    AccessibleComboBox preset_library_;
+    AccessibleComboBox preset_bank_;
+    AccessibleComboBox preset_category_;
     TextEditor preset_search_;
     PresetComboBox preset_selector_;
     ToggleButton preset_preview_ { "Autoload preset when scrolling" };
@@ -387,6 +424,8 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     StringArray section_names_;
     Array<File> all_presets_;
     Array<File> filtered_presets_;
+    std::vector<PresetBrowserItem> preset_index_;
+    std::unordered_map<std::string, size_t> preset_index_by_path_;
     StringArray preset_libraries_;
     StringArray preset_banks_;
     StringArray preset_categories_;
@@ -429,6 +468,11 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     int lfo_grid_index_ = 14;
     float lfo_cursor_phase_ = 0.0f;
     bool preset_controls_visible_ = false;
+    bool preset_list_loaded_ = false;
+    bool preset_list_loading_ = false;
+    bool preset_filter_update_pending_ = false;
+    bool preset_filter_rebuild_pending_ = false;
+    int preset_list_generation_ = 0;
     bool save_patch_dialog_visible_ = false;
     bool show_all_sections_ = true;
     bool updating_preset_list_ = false;

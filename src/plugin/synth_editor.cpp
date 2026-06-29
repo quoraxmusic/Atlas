@@ -40,6 +40,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace {
   constexpr const char* kPresetSection = "Presets";
@@ -460,6 +461,14 @@ namespace {
   }
 
   String filterPrefixForSection(const String& section_name) {
+    if (section_name.startsWith("Bus ") && section_name.endsWith(" - Filter")) {
+      const int bus = section_name.fromFirstOccurrenceOf("Bus ", false, false)
+                                  .upToFirstOccurrenceOf(" - Filter", false, false)
+                                  .getIntValue();
+      if (isPositiveAndBelow(bus - 1, vital::kNumBuses))
+        return "bus_" + String(bus) + "_filter_fx_";
+    }
+
     const int index = filterIndexForSection(section_name);
     if (index == 3)
       return "filter_fx_";
@@ -471,6 +480,38 @@ namespace {
     if (prefix.isEmpty() || !parameter_id.startsWith(prefix))
       return {};
     return parameter_id.fromFirstOccurrenceOf(prefix, false, false);
+  }
+
+  bool isFilterParameterSuffix(const String& suffix) {
+    static const std::array<const char*, 22> allowed_suffixes = {{
+      "mix",
+      "cutoff",
+      "resonance",
+      "drive",
+      "blend",
+      "style",
+      "model",
+      "on",
+      "blend_transpose",
+      "keytrack",
+      "formant_x",
+      "formant_y",
+      "formant_transpose",
+      "formant_resonance",
+      "formant_spread",
+      "osc1_input",
+      "osc2_input",
+      "osc3_input",
+      "osc4_input",
+      "sample_input",
+      "granular_input",
+      "filter_input",
+    }};
+    for (const auto* allowed : allowed_suffixes) {
+      if (suffix == allowed)
+        return true;
+    }
+    return false;
   }
 
   int numFilterStylesForModel(int model) {
@@ -805,7 +846,7 @@ namespace {
     return preset.getParentDirectory().getFileName();
   }
 
-  String presetCategoryName(const File& preset) {
+  String presetPathCategoryName(const File& preset) {
     const auto parts = presetPathParts(preset);
     const int preset_folder = indexOfPathPart(parts, LoadSave::kPresetFolderName);
     int category_start = preset_folder + 1;
@@ -820,6 +861,14 @@ namespace {
         category_parts.add(parts[i]);
       return category_parts.joinIntoString(" / ");
     }
+
+    return {};
+  }
+
+  String presetCategoryName(const File& preset) {
+    const String path_category = presetPathCategoryName(preset);
+    if (path_category.isNotEmpty())
+      return path_category;
 
     const String style = LoadSave::getStyleFromFile(preset);
     if (style.isNotEmpty())
@@ -838,6 +887,164 @@ namespace {
     }
     tags.removeDuplicates(false);
     return tags;
+  }
+
+  PresetBrowserItem buildPresetBrowserItem(const File& preset, const File& data_directory) {
+    PresetBrowserItem item;
+    item.file = preset;
+    item.file_size = preset.getSize();
+    item.modified_time = preset.getLastModificationTime().toMilliseconds();
+    item.library = presetLibraryName(preset);
+    item.bank = presetBankName(preset);
+    item.style = LoadSave::getStyleFromFile(preset);
+    const String path_category = presetPathCategoryName(preset);
+    item.category = path_category.isNotEmpty() ? path_category
+                                               : item.style.isNotEmpty() ? item.style : "Uncategorized";
+    item.tags = presetTagNames(preset);
+    item.author = LoadSave::getAuthorFromFile(preset);
+    item.label = preset.getFileNameWithoutExtension() + " - " + item.library + " - " + item.bank;
+    if (item.category.isNotEmpty() && item.category != "Uncategorized")
+      item.label += " - " + item.category;
+    item.searchable = (preset.getFileNameWithoutExtension() + " " +
+                       item.library + " " + item.bank + " " + item.category + " " +
+                       item.tags.joinIntoString(" ") + " " +
+                       preset.getRelativePathFrom(data_directory) + " " +
+                       item.author + " " + item.style).toLowerCase();
+    return item;
+  }
+
+  constexpr int kPresetIndexSchemaVersion = 1;
+
+  File presetIndexDatabaseFile() {
+    return LoadSave::getDataDirectory().getChildFile("AtlasPresetIndex.db");
+  }
+
+  String presetPathKey(const File& file) {
+    return file.getFullPathName();
+  }
+
+  bool presetFileStampMatches(const PresetBrowserItem& item, const File& file) {
+    return item.file_size == file.getSize() &&
+           item.modified_time == file.getLastModificationTime().toMilliseconds();
+  }
+
+  json stringArrayToJson(const StringArray& values) {
+    json result = json::array();
+    for (const auto& value : values)
+      result.push_back(value.toStdString());
+    return result;
+  }
+
+  StringArray stringArrayFromJson(const json& data) {
+    StringArray result;
+    if (!data.is_array())
+      return result;
+    for (const auto& value : data) {
+      if (value.is_string())
+        result.add(String(value.get<std::string>()));
+    }
+    result.removeDuplicates(false);
+    return result;
+  }
+
+  json presetBrowserItemToJson(const PresetBrowserItem& item) {
+    json data;
+    data["path"] = item.file.getFullPathName().toStdString();
+    data["size"] = item.file_size;
+    data["modified"] = item.modified_time;
+    data["library"] = item.library.toStdString();
+    data["bank"] = item.bank.toStdString();
+    data["category"] = item.category.toStdString();
+    data["tags"] = stringArrayToJson(item.tags);
+    data["author"] = item.author.toStdString();
+    data["style"] = item.style.toStdString();
+    data["label"] = item.label.toStdString();
+    data["searchable"] = item.searchable.toStdString();
+    return data;
+  }
+
+  bool presetBrowserItemFromJson(const json& data, PresetBrowserItem& item) {
+    if (!data.is_object() || !data.count("path") || !data["path"].is_string())
+      return false;
+
+    item.file = File(String(data["path"].get<std::string>()));
+    item.file_size = data.value("size", static_cast<int64>(0));
+    item.modified_time = data.value("modified", static_cast<int64>(0));
+    item.library = String(data.value("library", std::string()));
+    item.bank = String(data.value("bank", std::string()));
+    item.category = String(data.value("category", std::string("Uncategorized")));
+    item.tags = data.count("tags") ? stringArrayFromJson(data["tags"]) : StringArray();
+    item.author = String(data.value("author", std::string()));
+    item.style = String(data.value("style", std::string()));
+    item.label = String(data.value("label", std::string()));
+    item.searchable = String(data.value("searchable", std::string()));
+
+    if (item.label.isEmpty()) {
+      item.label = item.file.getFileNameWithoutExtension() + " - " + item.library + " - " + item.bank;
+      if (item.category.isNotEmpty() && item.category != "Uncategorized")
+        item.label += " - " + item.category;
+    }
+    if (item.searchable.isEmpty()) {
+      item.searchable = (item.file.getFileNameWithoutExtension() + " " +
+                         item.library + " " + item.bank + " " + item.category + " " +
+                         item.tags.joinIntoString(" ") + " " + item.author + " " + item.style).toLowerCase();
+    }
+    return true;
+  }
+
+  std::map<std::string, PresetBrowserItem> loadPresetIndexDatabase() {
+    std::map<std::string, PresetBrowserItem> items;
+    const File database = presetIndexDatabaseFile();
+    if (!database.existsAsFile())
+      return items;
+
+    try {
+      const json data = json::parse(database.loadFileAsString().toStdString(), nullptr, false);
+      if (data.is_discarded() || !data.is_object() ||
+          data.value("schema", 0) != kPresetIndexSchemaVersion ||
+          !data.count("presets") || !data["presets"].is_array())
+        return items;
+
+      for (const auto& entry : data["presets"]) {
+        PresetBrowserItem item;
+        if (presetBrowserItemFromJson(entry, item))
+          items[presetPathKey(item.file).toStdString()] = item;
+      }
+    }
+    catch (const json::exception&) {
+      return {};
+    }
+    return items;
+  }
+
+  void savePresetIndexDatabase(const std::vector<PresetBrowserItem>& items) {
+    File database = presetIndexDatabaseFile();
+    database.getParentDirectory().createDirectory();
+
+    json data;
+    data["schema"] = kPresetIndexSchemaVersion;
+    data["data_directory"] = LoadSave::getDataDirectory().getFullPathName().toStdString();
+    data["updated"] = Time::getCurrentTime().toMilliseconds();
+    data["presets"] = json::array();
+    for (const auto& item : items)
+      data["presets"].push_back(presetBrowserItemToJson(item));
+
+    database.replaceWithText(String(data.dump(2)));
+  }
+
+  CriticalSection& presetBrowserCacheLock() {
+    static CriticalSection lock;
+    return lock;
+  }
+
+  std::vector<PresetBrowserItem>& cachedPresetBrowserItems() {
+    static std::vector<PresetBrowserItem> items;
+    return items;
+  }
+
+  bool& cachedPresetBrowserItemsValid() {
+    static bool valid = false;
+    return valid;
   }
 
   bool isRoutingParameter(const String& id) {
@@ -1508,6 +1715,278 @@ namespace {
     return static_cast<int>(order.size());
   }
 
+  String descriptionForCommonSuffix(const String& suffix, const String& subject) {
+    if (suffix == "on")
+      return "Enable or mute " + subject + ".";
+    if (suffix == "level")
+      return "Set the output level of " + subject + ".";
+    if (suffix == "pan")
+      return "Place " + subject + " between the left and right channels.";
+    if (suffix == "destination")
+      return "Choose where " + subject + " is routed next.";
+    if (suffix == "transpose")
+      return "Transpose " + subject + " in semitones.";
+    if (suffix == "tune")
+      return "Fine tune " + subject + " in cents.";
+    if (suffix == "keytrack")
+      return "Control how much " + subject + " follows the played MIDI note.";
+    if (suffix == "root_key")
+      return "Set the note that plays the sample at its original pitch.";
+    if (suffix == "low_cutoff")
+      return "Remove low frequencies from " + subject + ".";
+    if (suffix == "high_cutoff")
+      return "Remove high frequencies from " + subject + ".";
+    if (suffix == "key_zone_start")
+      return "Set the lowest MIDI note that can trigger " + subject + ".";
+    if (suffix == "key_zone_end")
+      return "Set the highest MIDI note that can trigger " + subject + ".";
+    if (suffix == "velocity_zone_start")
+      return "Set the lowest velocity that can trigger " + subject + ".";
+    if (suffix == "velocity_zone_end")
+      return "Set the highest velocity that can trigger " + subject + ".";
+    if (suffix == "transpose_quantize_key")
+      return "Choose the root key used when pitch modulation is quantized.";
+    if (suffix == "transpose_quantize_scale")
+      return "Choose the scale used when pitch modulation is quantized.";
+    if (suffix == "transpose_quantize_mode")
+      return "Choose whether pitch quantize uses this source's scale or the global scale.";
+    if (suffix == "transpose_quantize")
+      return "Snap pitch modulation to the selected key and scale.";
+    return {};
+  }
+
+  String accessibleParameterHelpText(const String& parameter_id, const String& accessible_name, bool toggle) {
+    if (parameter_id.isEmpty())
+      return toggle ? "Enable or disable " + accessible_name + "." : "Adjust " + accessible_name + ".";
+
+    const String id = parameter_id.toLowerCase();
+    auto suffixAfter = [&id](const String& prefix) {
+      return id.fromFirstOccurrenceOf(prefix, false, false);
+    };
+
+    if (id == "volume")
+      return "Set Atlas's final output level.";
+    if (id == "bypass")
+      return "Bypass the whole instrument output.";
+    if (id == "polyphony")
+      return "Set the maximum number of voices Atlas can play at once.";
+    if (id == "legato")
+      return "When enabled, overlapping mono notes glide without retriggering the amp envelope.";
+    if (id == "portamento_time")
+      return "Set how long pitch glide takes between notes.";
+    if (id == "portamento_slope")
+      return "Shape the curve of the portamento glide.";
+    if (id == "portamento_force")
+      return "Force portamento even when notes are not overlapping.";
+    if (id == "voice_transpose")
+      return "Transpose the whole synth in semitones.";
+    if (id == "voice_tune")
+      return "Fine tune the whole synth in cents.";
+    if (id == "voice_amplitude")
+      return "Set the base voice amplitude before the final output stage.";
+    if (id == "velocity_track")
+      return "Control how much note velocity changes voice level.";
+    if (id == "pitch_bend_range")
+      return "Set the pitch bend wheel range in semitones.";
+    if (id == "stereo_routing")
+      return "Set how strongly the final signal is widened or rotated in stereo.";
+    if (id == "stereo_mode")
+      return "Choose Spread for width or Rotate for left-right rotation.";
+    if (id == "mpe_enabled")
+      return "Enable MPE input for per-note expression.";
+
+    for (int osc = 1; osc <= vital::kNumOscillators; ++osc) {
+      const String prefix = "osc_" + String(osc) + "_";
+      if (!id.startsWith(prefix))
+        continue;
+      const String suffix = suffixAfter(prefix);
+      const String subject = "oscillator " + String(osc);
+      if (const String common = descriptionForCommonSuffix(suffix, subject); common.isNotEmpty())
+        return common;
+      if (suffix == "wave_frame") return "Move through the frames of the oscillator wavetable.";
+      if (suffix == "unison_voices") return "Set how many detuned copies this oscillator plays.";
+      if (suffix == "unison_detune") return "Set the pitch spread between unison voices.";
+      if (suffix == "unison_blend") return "Balance the main voice against the unison voices.";
+      if (suffix == "stack_style") return "Choose how unison voices are pitch-stacked.";
+      if (suffix == "detune_power") return "Shape how detune is distributed across unison voices.";
+      if (suffix == "detune_range") return "Limit the pitch range used by unison detune.";
+      if (suffix == "spectral_unison") return "Add extra spectral copies inside the oscillator warp engine.";
+      if (suffix == "frame_spread") return "Spread unison voices across different wavetable frames.";
+      if (suffix == "stereo_spread") return "Spread unison voices across the stereo field.";
+      if (suffix == "phase") return "Set the oscillator start phase.";
+      if (suffix == "random_phase") return "Randomize oscillator start phase on each triggered note.";
+      if (suffix == "midi_track") return "Choose how strongly this oscillator follows MIDI note pitch.";
+      if (suffix == "smooth_interpolation") return "Smooth movement between wavetable frames.";
+      if (suffix == "distortion_type") return "Choose the oscillator distortion or ring modulation mode.";
+      if (suffix == "distortion_amount") return "Set how strongly the oscillator distortion is applied.";
+      if (suffix == "distortion_spread") return "Offset oscillator distortion amount across stereo or unison voices.";
+      if (suffix == "spectral_morph_type") return "Choose the oscillator frequency morph mode.";
+      if (suffix == "spectral_morph_amount") return "Set how strongly the frequency morph is applied.";
+      if (suffix == "spectral_morph_spread") return "Offset frequency morph amount across stereo or unison voices.";
+    }
+
+    if (id.startsWith("sample_")) {
+      const String suffix = suffixAfter("sample_");
+      if (const String common = descriptionForCommonSuffix(suffix, "the sample oscillator"); common.isNotEmpty())
+        return common;
+      if (suffix == "playback_mode") return "Choose whether notes retrigger the sample or only open the amp envelope.";
+      if (suffix == "loop") return "Loop the selected sample range while notes are held.";
+      if (suffix == "bounce") return "Play the sample loop forward then backward.";
+      if (suffix == "random_phase") return "Randomize the sample start point on each triggered note.";
+      if (suffix == "start") return "Set where sample playback begins.";
+      if (suffix == "end") return "Set where sample playback stops.";
+      if (suffix == "loop_start") return "Set the start point of the sample loop.";
+      if (suffix == "loop_end") return "Set the end point of the sample loop.";
+      if (suffix == "loop_crossfade") return "Crossfade the sample loop boundary to reduce clicks.";
+    }
+
+    if (id.startsWith("granular_")) {
+      const String suffix = suffixAfter("granular_");
+      if (const String common = descriptionForCommonSuffix(suffix, "the granular oscillator"); common.isNotEmpty())
+        return common;
+      if (suffix == "mode") return "Choose play-through or manual position mode for grains.";
+      if (suffix == "grain_count") return "Set how many grains can overlap at once.";
+      if (suffix == "density") return "Set how often new grains are created.";
+      if (suffix == "midi_density") return "Let MIDI note rate control grain density.";
+      if (suffix == "grain_size") return "Set the length of each grain.";
+      if (suffix == "speed") return "Set the grain playback speed through the sample.";
+      if (suffix == "position") return "Choose the sample position used for new grains.";
+      if (suffix == "position_mod") return "Set how far grain position moves automatically.";
+      if (suffix == "position_mod_rate") return "Set the speed of automatic position movement.";
+      if (suffix == "random_position") return "Randomize the start position of each grain.";
+      if (suffix == "random_volume") return "Randomize the level of each grain.";
+      if (suffix == "random_pan") return "Randomize the stereo position of each grain.";
+      if (suffix == "random_pitch") return "Randomize the pitch of each grain.";
+      if (suffix == "interval") return "Set the pitch interval used by random pitch jumps.";
+      if (suffix == "interval_chance") return "Set how often the granular pitch interval is applied.";
+      if (suffix == "direction") return "Choose forward, reverse, or mixed grain direction.";
+      if (suffix == "start") return "Set the start of the sample region used by the granular oscillator.";
+      if (suffix == "end") return "Set the end of the sample region used by the granular oscillator.";
+    }
+
+    if (id.startsWith("filter_") || id.startsWith("filter_fx_") || id.contains("_filter_fx_")) {
+      String suffix = id;
+      if (id.startsWith("filter_1_")) suffix = suffixAfter("filter_1_");
+      else if (id.startsWith("filter_2_")) suffix = suffixAfter("filter_2_");
+      else if (id.startsWith("filter_fx_")) suffix = suffixAfter("filter_fx_");
+      else if (id.contains("_filter_fx_")) suffix = id.fromFirstOccurrenceOf("_filter_fx_", false, false);
+
+      if (suffix == "on") return "Enable or bypass this filter.";
+      if (suffix == "mix") return "Blend between the dry signal and this filter.";
+      if (suffix == "model") return "Choose the filter model.";
+      if (suffix == "style") return "Choose the filter style or slope inside the selected model.";
+      if (suffix == "cutoff") return "Set the main filter cutoff frequency.";
+      if (suffix == "resonance") return "Boost frequencies around the cutoff point.";
+      if (suffix == "drive") return "Drive the filter input for more saturation.";
+      if (suffix == "blend") return "Morph between the available responses of the selected filter model.";
+      if (suffix == "blend_transpose") return "Tune the comb filter blend pitch.";
+      if (suffix == "keytrack") return "Control how much filter cutoff follows the played note.";
+      if (suffix == "formant_x") return "Move the formant filter along its X vowel axis.";
+      if (suffix == "formant_y") return "Move the formant filter along its Y vowel axis.";
+      if (suffix == "formant_transpose") return "Transpose the formant filter.";
+      if (suffix == "formant_resonance") return "Control the sharpness of the formant peaks.";
+      if (suffix == "formant_spread") return "Spread the formant peaks apart.";
+      if (suffix.endsWith("_input")) return "Choose whether this source feeds the filter.";
+      if (suffix == "destination") return "Choose where this filter output is routed.";
+    }
+
+    if (id.startsWith("env_")) {
+      const String suffix = id.fromFirstOccurrenceOf("_", false, false).fromFirstOccurrenceOf("_", false, false);
+      if (suffix == "delay") return "Wait before this envelope begins after a note starts.";
+      if (suffix == "attack") return "Set how long the envelope takes to rise.";
+      if (suffix == "hold") return "Hold the envelope at full level before decay begins.";
+      if (suffix == "decay") return "Set how long the envelope takes to fall to sustain.";
+      if (suffix == "sustain") return "Set the level held while the note is held.";
+      if (suffix == "release") return "Set how long the envelope takes to fade after note release.";
+      if (suffix == "attack_power" || suffix == "decay_power" || suffix == "release_power")
+        return "Shape the curve of this envelope stage.";
+    }
+
+    if (id.startsWith("lfo_")) {
+      const String suffix = id.fromFirstOccurrenceOf("_", false, false).fromFirstOccurrenceOf("_", false, false);
+      if (suffix == "frequency") return "Set the free-running LFO rate.";
+      if (suffix == "tempo") return "Choose the tempo-synced LFO rate.";
+      if (suffix == "sync") return "Choose seconds, tempo, dotted, triplet, or keytracked timing.";
+      if (suffix == "sync_type") return "Choose whether the LFO follows host transport or retriggers freely.";
+      if (suffix == "phase") return "Set where the LFO cycle starts.";
+      if (suffix == "delay") return "Delay the LFO after note start.";
+      if (suffix == "fade") return "Fade the LFO in after note start.";
+      if (suffix == "smooth_mode") return "Choose how LFO smoothing is applied.";
+      if (suffix == "smooth_time") return "Set the amount of smoothing applied to LFO movement.";
+      if (suffix == "stereo") return "Offset the LFO phase between left and right channels.";
+      if (suffix == "rate_x10") return "Multiply this LFO rate by ten.";
+      if (suffix == "keytrack_transpose") return "Transpose the keytracked LFO rate.";
+      if (suffix == "keytrack_tune") return "Fine tune the keytracked LFO rate.";
+    }
+
+    if (id.startsWith("random_")) {
+      const String suffix = id.fromFirstOccurrenceOf("_", false, false).fromFirstOccurrenceOf("_", false, false);
+      if (suffix == "style") return "Choose the random modulation shape.";
+      if (suffix == "frequency") return "Set the free-running random modulation rate.";
+      if (suffix == "rate_x10") return "Multiply this random modulation rate by ten.";
+      if (suffix == "sync") return "Choose seconds, tempo, dotted, triplet, or keytracked timing.";
+      if (suffix == "tempo") return "Choose the tempo-synced random modulation rate.";
+      if (suffix == "sync_type") return "Choose whether random modulation follows host transport.";
+      if (suffix == "stereo") return "Choose whether left and right channels share or split random values.";
+      if (suffix == "keytrack_transpose") return "Transpose the keytracked random rate.";
+      if (suffix == "keytrack_tune") return "Fine tune the keytracked random rate.";
+    }
+
+    if (id.startsWith("modulation_")) {
+      if (id.endsWith("_amount")) return "Set the depth of this modulation route.";
+      if (id.endsWith("_power")) return "Shape the curve of this modulation route.";
+      if (id.endsWith("_bipolar")) return "Use the modulation source in both positive and negative directions.";
+      if (id.endsWith("_stereo")) return "Invert this modulation amount between left and right channels.";
+      if (id.endsWith("_bypass")) return "Temporarily disable this modulation route.";
+    }
+
+    if (id.startsWith("macro_control_"))
+      return "Control this macro value for modulation assignments.";
+    if (id.startsWith("macro_bipolar_"))
+      return "Choose whether this macro ranges from zero to one hundred or minus one hundred to one hundred.";
+
+    auto effectSuffix = [&id](const String& prefix) -> String {
+      if (id.startsWith(prefix))
+        return id.fromFirstOccurrenceOf(prefix, false, false);
+      if (id.contains("_" + prefix))
+        return id.fromFirstOccurrenceOf("_" + prefix, false, false);
+      return {};
+    };
+    String effect_suffix;
+    const std::array<String, 13> effect_prefixes {{
+      "chorus_", "compressor_", "delay_", "dimension_expander_", "distortion_", "eq_", "flanger_",
+      "frequency_shifter_", "limiter_", "phase_shift_", "phaser_", "reverb_", "utility_"
+    }};
+    for (const auto& prefix : effect_prefixes) {
+      effect_suffix = effectSuffix(prefix);
+      if (effect_suffix.isNotEmpty())
+        break;
+    }
+    if (effect_suffix.isNotEmpty()) {
+      if (effect_suffix == "on") return "Enable or bypass this effect.";
+      if (effect_suffix == "mix" || effect_suffix == "dry_wet") return "Blend between the dry signal and this effect.";
+      if (effect_suffix == "feedback") return "Feed effect output back into its input.";
+      if (effect_suffix == "frequency" || effect_suffix == "cutoff" || effect_suffix.endsWith("_cutoff") ||
+          effect_suffix == "low_cut" || effect_suffix == "high_cut")
+        return "Set the filter frequency used by this effect.";
+      if (effect_suffix == "tempo") return "Choose this effect's tempo-synced rate.";
+      if (effect_suffix == "sync") return "Choose free or tempo-synced timing for this effect.";
+      if (effect_suffix == "type" || effect_suffix == "style" || effect_suffix.endsWith("_mode"))
+        return "Choose the operating mode for this effect.";
+      if (effect_suffix == "drive") return "Set how hard the signal drives this effect.";
+      if (effect_suffix == "gain") return "Set this effect's output gain.";
+      if (effect_suffix == "width") return "Control the stereo width of this effect.";
+      if (effect_suffix == "threshold") return "Set the level where this dynamics effect begins working.";
+      if (effect_suffix == "attack") return "Set how quickly this dynamics effect reacts to rising level.";
+      if (effect_suffix == "release") return "Set how quickly this dynamics effect relaxes.";
+      if (effect_suffix == "ratio") return "Set the amount of compression above the threshold.";
+      if (effect_suffix == "size") return "Set the size or length of this effect.";
+      if (effect_suffix == "decay") return "Set how long this effect rings out.";
+    }
+
+    return toggle ? "Enable or disable " + accessible_name + "." : "Adjust " + accessible_name + ".";
+  }
+
   String numberWord(int number) {
     static const std::array<const char*, 20> words = {{
       "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -2021,7 +2500,8 @@ namespace {
         return AccessibilityHandler::getCurrentState().withAccessibleOffscreen();
       }
 
-      String getHelp() const override { return slider_.getTooltip(); }
+      String getDescription() const override { return {}; }
+      String getHelp() const override { return {}; }
 
     private:
       static AccessibilityActions contextMenuActions(Slider& slider) {
@@ -2091,7 +2571,8 @@ namespace {
         return title.isEmpty() ? button_.getButtonText() : title;
       }
 
-      String getHelp() const override { return button_.getTooltip(); }
+      String getDescription() const override { return {}; }
+      String getHelp() const override { return {}; }
 
     private:
       class ValueInterface final : public AccessibilityTextValueInterface {
@@ -2148,6 +2629,14 @@ namespace {
 
   class OffscreenComboBox : public ComboBox {
     public:
+      std::function<void()> onFocusGained;
+
+      void focusGained(FocusChangeType cause) override {
+        ComboBox::focusGained(cause);
+        if (onFocusGained)
+          onFocusGained();
+      }
+
       std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override {
         class Handler final : public AccessibilityHandler {
           public:
@@ -2167,7 +2656,8 @@ namespace {
               return combo_box_.isPopupActive() ? state.withExpanded() : state.withCollapsed();
             }
 
-            String getHelp() const override { return combo_box_.getTooltip(); }
+            String getDescription() const override { return {}; }
+            String getHelp() const override { return {}; }
 
           private:
             class ValueInterface final : public AccessibilityTextValueInterface {
@@ -2304,7 +2794,8 @@ std::unique_ptr<AccessibilityHandler> AccessibleTextButton::createAccessibilityH
         return title.isEmpty() ? button_.getButtonText() : title;
       }
 
-      String getHelp() const override { return button_.getTooltip(); }
+      String getDescription() const override { return {}; }
+      String getHelp() const override { return {}; }
 
     private:
       Button& button_;
@@ -2332,7 +2823,8 @@ std::unique_ptr<AccessibilityHandler> AccessibleComboBox::createAccessibilityHan
         return combo_box_.isPopupActive() ? state.withExpanded() : state.withCollapsed();
       }
 
-      String getHelp() const override { return combo_box_.getTooltip(); }
+      String getDescription() const override { return {}; }
+      String getHelp() const override { return {}; }
 
     private:
       class ValueInterface final : public AccessibilityTextValueInterface {
@@ -2372,6 +2864,9 @@ class AccessibleParameterRow : public Component {
       const auto name = parameter_.getName(128);
       const bool random_rate = parameter_id.startsWith("random_") && parameter_id.endsWith("_frequency");
       const auto accessible_name = accessibleName.isNotEmpty() ? accessibleName : (random_rate ? String("Rate") : name);
+      const String parameter_description = accessibleDescription.isNotEmpty()
+          ? accessibleDescription
+          : accessibleParameterHelpText(parameter_id, accessible_name, use_toggle_control_);
       label_.setText(accessible_name, dontSendNotification);
       label_.setTitle(accessible_name + " label");
       label_.setColour(Label::textColourId, Colours::white);
@@ -2380,8 +2875,8 @@ class AccessibleParameterRow : public Component {
       if (use_toggle_control_) {
         toggle_.setButtonText(accessible_name);
         toggle_.setTitle(accessible_name);
-        toggle_.setDescription(accessibleDescription.isNotEmpty() ? accessibleDescription
-                                                                  : "Turn " + accessible_name + " on or off");
+        toggle_.setDescription(parameter_description);
+        toggle_.setTooltip(parameter_description);
         if (accessibleOffText.isNotEmpty())
           toggle_.getProperties().set("accessibleOffText", accessibleOffText);
         if (accessibleOnText.isNotEmpty())
@@ -2403,9 +2898,8 @@ class AccessibleParameterRow : public Component {
         slider_.setRange(min_normalized_value_, max_normalized_value_,
                          steps > 1 && steps < 10000 ? 1.0 / (steps - 1) : 0.0);
         slider_.setTitle(accessible_name);
-        slider_.setDescription(accessibleDescription.isNotEmpty() ? accessibleDescription
-                                                                  : (random_rate ? "Adjust free-running random modulation period"
-                                                                                 : "Adjust " + accessible_name));
+        slider_.setDescription(parameter_description);
+        slider_.setTooltip(parameter_description);
         slider_.setHelpText(random_rate ? "In free mode this controls how long each random cycle lasts. In synced mode use Tempo."
                                         : "Use arrows for changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default, Shift M for modulation, Shift L for MIDI learn, and Shift C to clear MIDI learn. Press the right bracket key, or VoiceOver Shift M, for the context menu.");
         slider_.setWantsKeyboardFocus(true);
@@ -2505,8 +2999,11 @@ class AccessibleParameterRow : public Component {
       label_.setText(name, dontSendNotification);
       label_.setTitle(name + " label");
       focusableControl()->setTitle(name);
-      if (description.isNotEmpty())
+      if (description.isNotEmpty()) {
         focusableControl()->setDescription(description);
+        if (auto* tooltip = dynamic_cast<SettableTooltipClient*>(focusableControl()))
+          tooltip->setTooltip(description);
+      }
       if (auto* handler = focusableControl()->getAccessibilityHandler())
         handler->notifyAccessibilityEvent(AccessibilityEvent::titleChanged);
       repaint();
@@ -2573,7 +3070,7 @@ class AccessibleParameterRow : public Component {
       std::map<int, String> add_modulation_choices;
       menu.addSectionHeader(parameter_.getName(128));
       if (!is_toggle && slider_.onTextEntryCommand)
-        menu.addItem(kContextTypeValue, "Type a value\xe2\x80\xa6");
+        menu.addItem(kContextTypeValue, "Type a value...");
       menu.addItem(kContextResetDefault, "Reset to default");
       if (canAddModulation(parameter_id)) {
         if (modulation_source_submenu_callback_) {
@@ -2582,7 +3079,7 @@ class AccessibleParameterRow : public Component {
           menu.addSubMenu("Add modulation source", add_menu, !add_modulation_choices.empty());
         }
         else {
-          menu.addItem(kContextAddModulation, "Add modulation source\xe2\x80\xa6");
+          menu.addItem(kContextAddModulation, "Add modulation source...");
         }
       }
       for (int i = 0; i < static_cast<int>(removable_modulations.size()); ++i)
@@ -2885,14 +3382,18 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   preset_library_.setDescription("Filter presets by factory, user, or other installed libraries");
   preset_library_.setHelpText("Choose all libraries, factory, user, or other preset locations");
   preset_library_.setWantsKeyboardFocus(true);
+  preset_library_.onFocusGained = [this] { ensurePresetListLoaded(); };
   preset_library_.onChange = [this] {
     if (updating_preset_list_)
       return;
+    if (!preset_list_loaded_) {
+      ensurePresetListLoaded();
+      return;
+    }
     last_preset_library = preset_library_.getText();
     last_preset_bank = kAllBanks;
     last_preset_category = kAllCategories;
-    populatePresetFilters();
-    filterPresetList();
+    schedulePresetFilterUpdate(true);
   };
   addChildComponent(preset_library_);
 
@@ -2900,13 +3401,17 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   preset_bank_.setDescription("Filter presets by bank or sound pack");
   preset_bank_.setHelpText("Choose all banks or one installed bank");
   preset_bank_.setWantsKeyboardFocus(true);
+  preset_bank_.onFocusGained = [this] { ensurePresetListLoaded(); };
   preset_bank_.onChange = [this] {
     if (updating_preset_list_)
       return;
+    if (!preset_list_loaded_) {
+      ensurePresetListLoaded();
+      return;
+    }
     last_preset_bank = preset_bank_.getText();
     last_preset_category = kAllCategories;
-    populatePresetFilters();
-    filterPresetList();
+    schedulePresetFilterUpdate(true);
   };
   addChildComponent(preset_bank_);
 
@@ -2914,11 +3419,16 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   preset_category_.setDescription("Filter presets by category when the bank provides one");
   preset_category_.setHelpText("Choose all categories or one category");
   preset_category_.setWantsKeyboardFocus(true);
+  preset_category_.onFocusGained = [this] { ensurePresetListLoaded(); };
   preset_category_.onChange = [this] {
     if (updating_preset_list_)
       return;
+    if (!preset_list_loaded_) {
+      ensurePresetListLoaded();
+      return;
+    }
     last_preset_category = preset_category_.getText();
-    filterPresetList();
+    schedulePresetFilterUpdate(false);
   };
   addChildComponent(preset_category_);
 
@@ -2930,7 +3440,11 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   preset_search_.setText(last_preset_search, false);
   preset_search_.onTextChange = [this] {
     last_preset_search = preset_search_.getText();
-    filterPresetList();
+    if (!preset_list_loaded_) {
+      ensurePresetListLoaded();
+      return;
+    }
+    schedulePresetFilterUpdate(false);
   };
   addChildComponent(preset_search_);
 
@@ -2938,15 +3452,20 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   preset_selector_.setDescription("Factory and user presets from Atlas's resources folder. Press Enter to load.");
   preset_selector_.setHelpText("Choose a preset, then press Enter to load it. If autoload is enabled, changing selection loads immediately.");
   preset_selector_.setWantsKeyboardFocus(true);
+  preset_selector_.onFocusGained = [this] { ensurePresetListLoaded(); };
   preset_selector_.onReturnKey = [this] { loadSelectedPreset(); };
   preset_selector_.onChange = [this] {
     if (updating_preset_list_)
       return;
+    if (!preset_list_loaded_) {
+      ensurePresetListLoaded();
+      return;
+    }
     const int index = preset_selector_.getSelectedItemIndex();
     if (isPositiveAndBelow(index, filtered_presets_.size()))
       last_preset_path = filtered_presets_[index].getFullPathName();
     if (preset_preview_.getToggleState() && isPositiveAndBelow(index, filtered_presets_.size()))
-      loadPresetFile(filtered_presets_[index], true);
+      loadPresetFile(filtered_presets_[index], true, false);
   };
   addChildComponent(preset_selector_);
 
@@ -3494,7 +4013,6 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   addAndMakeVisible(viewport_);
 
   buildSections();
-  refreshPresetList(false);
   const int imported = synth_.takeDownloadedPresetsImported();
   if (imported > 0)
     postPluginAnnouncement("Imported " + String(imported) + " new presets from Downloads folder",
@@ -3516,10 +4034,6 @@ SynthEditor::SynthEditor(SynthPlugin& synth) :
   setResizeLimits(680, 480, 1400, 1000);
   setSize(900, 700);
   startTimerHz(20);
-  Timer::callAfterDelay(250, [safe_this = Component::SafePointer<SynthEditor>(this)] {
-    if (safe_this != nullptr)
-      safe_this->primeBrowserFileCaches();
-  });
 }
 
 void SynthEditor::paint(Graphics& graphics) {
@@ -3863,6 +4377,14 @@ std::unique_ptr<AccessibleParameterRow> SynthEditor::createAccessibleParameterRo
 
   const String parameter_id = bridge->getParameterId();
   const String suffix = filterSuffixForParameter(sectionName, parameter_id);
+  if (parameter_id == "stereo_mode") {
+    return std::make_unique<AccessibleParameterRow>(
+        parameter, "Stereo mode",
+        [](double value) { return value >= 0.5 ? "Rotate" : "Spread"; }, 1.0, 0.0,
+        String(), String(),
+        "Choose how the final stereo routing control treats the left and right channels", true);
+  }
+
   if (isTransposeQuantizeParameter(parameter_id)) {
     return std::make_unique<AccessibleParameterRow>(parameter, "Transpose quantize",
                                                     [bridge](double value) {
@@ -4087,12 +4609,19 @@ bool SynthEditor::shouldShowParameterInSection(const String& sectionName, AudioP
   if (bridge == nullptr)
     return true;
 
+  const String parameter_id = bridge->getParameterId();
+  if (parameter_id == "beats_per_minute" || parameter_id == "view_spectrogram" ||
+      parameter_id.endsWith("_view_2d"))
+    return false;
+
   if (isMacroBipolarParameterId(bridge->getParameterId()))
     return false;
 
-  const String suffix = filterSuffixForParameter(sectionName, bridge->getParameterId());
+  const String suffix = filterSuffixForParameter(sectionName, parameter_id);
   if (suffix.isEmpty())
     return true;
+  if (!isFilterParameterSuffix(suffix))
+    return false;
 
   const String prefix = filterPrefixForSection(sectionName);
   int model = 0;
@@ -4203,10 +4732,11 @@ void SynthEditor::restoreFocusAfterRebuild(const String& parameterId, Component*
   if (target == nullptr)
     return;
 
+  Component::SafePointer<SynthEditor> safe_this(this);
   Component::SafePointer<Component> safe_target(target);
-  MessageManager::callAsync([this, safe_target] {
-    if (safe_target != nullptr && safe_target->isShowing()) {
-      ensureComponentVisible(safe_target.getComponent());
+  MessageManager::callAsync([safe_this, safe_target] {
+    if (safe_this != nullptr && safe_target != nullptr && safe_target->isShowing()) {
+      safe_this->ensureComponentVisible(safe_target.getComponent());
       safe_target->grabKeyboardFocus();
     }
   });
@@ -4332,11 +4862,16 @@ void SynthEditor::showSection(int index, bool announce) {
       slider_ptr->textFromValueFunction = [suffix](double slider_value) {
         return String(slider_value, 0) + suffix;
       };
-      slider_ptr->onTextEntryCommand = [this, slider_ptr, title](Component& target) {
-        promptForCustomValue(title, slider_ptr->getTextFromValue(slider_ptr->getValue()), target,
-                             [slider_ptr](const String& text) {
-                               Slider::ScopedDragNotification drag(*slider_ptr);
-                               slider_ptr->setValue(slider_ptr->getValueFromText(text), sendNotificationSync);
+      slider_ptr->onTextEntryCommand = [this, safe_slider = Component::SafePointer<OffscreenSlider>(slider_ptr),
+                                        title](Component& target) {
+        if (safe_slider == nullptr)
+          return;
+        promptForCustomValue(title, safe_slider->getTextFromValue(safe_slider->getValue()), target,
+                             [safe_slider](const String& text) {
+                               if (safe_slider == nullptr)
+                                 return;
+                               Slider::ScopedDragNotification drag(*safe_slider);
+                               safe_slider->setValue(safe_slider->getValueFromText(text), sendNotificationSync);
                              });
       };
       slider_ptr->setBounds(0, y, jmax(620, viewport_.getMaximumVisibleWidth()), 42);
@@ -4720,6 +5255,7 @@ void SynthEditor::showAllSections(bool announce) {
               return handleMacroShortcut(parameterId, key, target) ||
                      handleEffectShortcut(section_name, key, target);
             });
+            row->setAccessibleName(modulationControlTitle(bridge->getParameterId()));
             row->setExplicitFocusOrder(focus_order++);
             row->setControlFocusOrder(focus_order++);
             row->setBounds(10, slot_y, jmax(600, slot_width - 20), 48);
@@ -4809,11 +5345,16 @@ void SynthEditor::showAllSections(bool announce) {
           slider_ptr->textFromValueFunction = [suffix](double slider_value) {
             return String(slider_value, 0) + suffix;
           };
-          slider_ptr->onTextEntryCommand = [this, slider_ptr, title](Component& target) {
-            promptForCustomValue(title, slider_ptr->getTextFromValue(slider_ptr->getValue()), target,
-                                 [slider_ptr](const String& text) {
-                                   Slider::ScopedDragNotification drag(*slider_ptr);
-                                   slider_ptr->setValue(slider_ptr->getValueFromText(text), sendNotificationSync);
+          slider_ptr->onTextEntryCommand = [this, safe_slider = Component::SafePointer<OffscreenSlider>(slider_ptr),
+                                            title](Component& target) {
+            if (safe_slider == nullptr)
+              return;
+            promptForCustomValue(title, safe_slider->getTextFromValue(safe_slider->getValue()), target,
+                                 [safe_slider](const String& text) {
+                                   if (safe_slider == nullptr)
+                                     return;
+                                   Slider::ScopedDragNotification drag(*safe_slider);
+                                   safe_slider->setValue(safe_slider->getValueFromText(text), sendNotificationSync);
                                  });
           };
           slider_ptr->setBounds(control_x, section_y, control_width, 42);
@@ -5526,7 +6067,7 @@ void SynthEditor::removeModulationFromParameter(const String& sourceId, const St
 }
 
 String SynthEditor::modulationSlotTitle(int slot) const {
-  String title = "Modulation " + numberWord(slot);
+  String title = modulationSlotHeaderTitle(slot);
   auto* connection = synth_.getModulationBank().atIndex(slot - 1);
   if (connection == nullptr)
     return title;
@@ -5541,6 +6082,26 @@ String SynthEditor::modulationSlotTitle(int slot) const {
   if (!connection->destination_name.empty())
     title += " (" + modulationDestinationLabelForId(connection->destination_name) + ")";
   return title;
+}
+
+String SynthEditor::modulationSlotHeaderTitle(int slot) const {
+  return "Modulation " + numberWord(slot);
+}
+
+String SynthEditor::modulationControlTitle(const String& parameterId) const {
+  const String rest = parameterId.fromFirstOccurrenceOf("modulation_", false, false);
+  const String suffix = rest.fromFirstOccurrenceOf("_", false, false);
+  if (suffix == "amount")
+    return "Amount";
+  if (suffix == "power")
+    return "Power";
+  if (suffix == "bipolar")
+    return "Bipolar";
+  if (suffix == "stereo")
+    return "Stereo";
+  if (suffix == "bypass")
+    return "Bypass";
+  return readableId(suffix);
 }
 
 void SynthEditor::announceModulationSummary() {
@@ -5626,11 +6187,122 @@ void SynthEditor::setPresetControlsVisible(bool visible) {
   resized();
 }
 
+void SynthEditor::ensurePresetListLoaded() {
+  if (preset_list_loaded_ || preset_list_loading_)
+    return;
+
+  startPresetListLoad(false);
+}
+
 void SynthEditor::refreshPresetList(bool announce) {
+  startPresetListLoad(announce, true);
+}
+
+void SynthEditor::startPresetListLoad(bool announce, bool forceRefresh) {
+  const int generation = ++preset_list_generation_;
+
+  if (!forceRefresh) {
+    std::vector<PresetBrowserItem> cached_items;
+    bool cache_valid = false;
+    {
+      const ScopedLock lock(presetBrowserCacheLock());
+      cache_valid = cachedPresetBrowserItemsValid();
+      if (cache_valid)
+        cached_items = cachedPresetBrowserItems();
+    }
+
+    if (cache_valid) {
+      applyPresetList(std::move(cached_items), announce, generation);
+      return;
+    }
+  }
+
+  preset_list_loaded_ = false;
+  preset_list_loading_ = true;
+  filtered_presets_.clear();
+  preset_selector_.clear(dontSendNotification);
+  updatePresetSummary();
+
+  Component::SafePointer<SynthEditor> safe_this(this);
+  Thread::launch([safe_this, generation, announce, forceRefresh] {
+    auto persisted_items = forceRefresh ? std::map<std::string, PresetBrowserItem>()
+                                        : loadPresetIndexDatabase();
+    bool displayed_persisted_database = false;
+    if (!forceRefresh && !persisted_items.empty()) {
+      std::vector<PresetBrowserItem> database_items;
+      database_items.reserve(persisted_items.size());
+      for (const auto& [path, item] : persisted_items)
+        database_items.push_back(item);
+
+      {
+        const ScopedLock lock(presetBrowserCacheLock());
+        cachedPresetBrowserItems() = database_items;
+        cachedPresetBrowserItemsValid() = true;
+      }
+
+      displayed_persisted_database = true;
+      MessageManager::callAsync([safe_this, generation, database_items = std::move(database_items)]() mutable {
+        if (safe_this != nullptr)
+          safe_this->applyPresetList(std::move(database_items), false, generation);
+      });
+    }
+
+    Array<File> presets;
+    LoadSave::getAllPresets(presets);
+    LoadSave::FileSorterAscending sorter;
+    presets.sort(sorter);
+
+    const File data_directory = LoadSave::getDataDirectory();
+    std::vector<PresetBrowserItem> items;
+    items.reserve(static_cast<size_t>(presets.size()));
+    bool database_changed = false;
+    for (const auto& preset : presets) {
+      const String key = presetPathKey(preset);
+      auto found = persisted_items.find(key.toStdString());
+      if (found != persisted_items.end() && presetFileStampMatches(found->second, preset)) {
+        items.push_back(found->second);
+        continue;
+      }
+
+      items.push_back(buildPresetBrowserItem(preset, data_directory));
+      database_changed = true;
+    }
+    if (forceRefresh || persisted_items.size() != static_cast<size_t>(presets.size()))
+      database_changed = true;
+    if (database_changed)
+      savePresetIndexDatabase(items);
+
+    {
+      const ScopedLock lock(presetBrowserCacheLock());
+      cachedPresetBrowserItems() = items;
+      cachedPresetBrowserItemsValid() = true;
+    }
+
+    if (displayed_persisted_database && !database_changed && !announce)
+      return;
+
+    MessageManager::callAsync([safe_this, generation, announce, items = std::move(items)]() mutable {
+      if (safe_this != nullptr)
+        safe_this->applyPresetList(std::move(items), announce, generation);
+    });
+  });
+}
+
+void SynthEditor::applyPresetList(std::vector<PresetBrowserItem> items, bool announce, int generation) {
+  if (generation != preset_list_generation_)
+    return;
+
+  preset_index_ = std::move(items);
+  preset_list_loading_ = false;
+  preset_list_loaded_ = true;
   all_presets_.clear();
-  LoadSave::getAllPresets(all_presets_);
-  LoadSave::FileSorterAscending sorter;
-  all_presets_.sort(sorter);
+  preset_index_by_path_.clear();
+  preset_index_by_path_.reserve(preset_index_.size());
+  for (size_t i = 0; i < preset_index_.size(); ++i) {
+    const auto& item = preset_index_[i];
+    all_presets_.add(item.file);
+    preset_index_by_path_[item.file.getFullPathName().toStdString()] = i;
+  }
   populatePresetFilters();
   filterPresetList();
   updatePresetSummary();
@@ -5639,19 +6311,27 @@ void SynthEditor::refreshPresetList(bool announce) {
                                            AccessibilityHandler::AnnouncementPriority::medium);
 }
 
+const PresetBrowserItem* SynthEditor::presetItemForFile(const File& file) const {
+  const auto found = preset_index_by_path_.find(file.getFullPathName().toStdString());
+  if (found == preset_index_by_path_.end() || found->second >= preset_index_.size())
+    return nullptr;
+  return &preset_index_[found->second];
+}
+
 void SynthEditor::populatePresetFilters() {
   ScopedValueSetter<bool> guard(updating_preset_list_, true);
 
   preset_libraries_.clear();
   preset_libraries_.add(kAllLibraries);
-  for (const auto& preset : all_presets_) {
-    const String library = presetLibraryName(preset);
-    if (library.isNotEmpty() && !preset_libraries_.contains(library))
+  std::set<String> libraries;
+  for (const auto& item : preset_index_) {
+    if (item.library.isNotEmpty())
+      libraries.insert(item.library);
+  }
+  for (const auto& library : libraries) {
+    if (library != kAllLibraries)
       preset_libraries_.add(library);
   }
-  preset_libraries_.sort(true);
-  preset_libraries_.removeString(kAllLibraries);
-  preset_libraries_.insert(0, kAllLibraries);
 
   preset_library_.clear(dontSendNotification);
   preset_library_.addItemList(preset_libraries_, 1);
@@ -5663,16 +6343,17 @@ void SynthEditor::populatePresetFilters() {
 
   preset_banks_.clear();
   preset_banks_.add(kAllBanks);
-  for (const auto& preset : all_presets_) {
-    if (last_preset_library != kAllLibraries && presetLibraryName(preset) != last_preset_library)
+  std::set<String> banks;
+  for (const auto& item : preset_index_) {
+    if (last_preset_library != kAllLibraries && item.library != last_preset_library)
       continue;
-    const String bank = presetBankName(preset);
-    if (bank.isNotEmpty() && !preset_banks_.contains(bank))
+    if (item.bank.isNotEmpty())
+      banks.insert(item.bank);
+  }
+  for (const auto& bank : banks) {
+    if (bank != kAllBanks)
       preset_banks_.add(bank);
   }
-  preset_banks_.sort(true);
-  preset_banks_.removeString(kAllBanks);
-  preset_banks_.insert(0, kAllBanks);
 
   preset_bank_.clear(dontSendNotification);
   preset_bank_.addItemList(preset_banks_, 1);
@@ -5684,22 +6365,23 @@ void SynthEditor::populatePresetFilters() {
 
   preset_categories_.clear();
   preset_categories_.add(kAllCategories);
-  for (const auto& preset : all_presets_) {
-    if (last_preset_library != kAllLibraries && presetLibraryName(preset) != last_preset_library)
+  std::set<String> categories;
+  for (const auto& item : preset_index_) {
+    if (last_preset_library != kAllLibraries && item.library != last_preset_library)
       continue;
-    if (last_preset_bank != kAllBanks && presetBankName(preset) != last_preset_bank)
+    if (last_preset_bank != kAllBanks && item.bank != last_preset_bank)
       continue;
-    const String category = presetCategoryName(preset);
-    if (category.isNotEmpty() && !preset_categories_.contains(category))
-      preset_categories_.add(category);
-    for (const auto& tag : presetTagNames(preset)) {
-      if (tag.isNotEmpty() && !preset_categories_.contains(tag))
-        preset_categories_.add(tag);
+    if (item.category.isNotEmpty())
+      categories.insert(item.category);
+    for (const auto& tag : item.tags) {
+      if (tag.isNotEmpty())
+        categories.insert(tag);
     }
   }
-  preset_categories_.sort(true);
-  preset_categories_.removeString(kAllCategories);
-  preset_categories_.insert(0, kAllCategories);
+  for (const auto& category : categories) {
+    if (category != kAllCategories)
+      preset_categories_.add(category);
+  }
 
   preset_category_.clear(dontSendNotification);
   preset_category_.addItemList(preset_categories_, 1);
@@ -5711,33 +6393,30 @@ void SynthEditor::populatePresetFilters() {
 }
 
 void SynthEditor::filterPresetList() {
+  if (!preset_list_loaded_) {
+    filtered_presets_.clear();
+    preset_selector_.clear(dontSendNotification);
+    updatePresetSummary();
+    return;
+  }
+
   ScopedValueSetter<bool> guard(updating_preset_list_, true);
   filtered_presets_.clear();
   const String filter = preset_search_.getText().trim().toLowerCase();
-  const File data_directory = LoadSave::getDataDirectory();
   const String library_filter = preset_library_.getText().isEmpty() ? kAllLibraries : preset_library_.getText();
   const String bank_filter = preset_bank_.getText().isEmpty() ? kAllBanks : preset_bank_.getText();
   const String category_filter = preset_category_.getText().isEmpty() ? kAllCategories : preset_category_.getText();
 
-  for (const auto& preset : all_presets_) {
-    const String library = presetLibraryName(preset);
-    const String bank = presetBankName(preset);
-    const String category = presetCategoryName(preset);
-    const StringArray tags = presetTagNames(preset);
-    if (library_filter != kAllLibraries && library != library_filter)
+  for (const auto& item : preset_index_) {
+    if (library_filter != kAllLibraries && item.library != library_filter)
       continue;
-    if (bank_filter != kAllBanks && bank != bank_filter)
+    if (bank_filter != kAllBanks && item.bank != bank_filter)
       continue;
-    if (category_filter != kAllCategories && category != category_filter && !tags.contains(category_filter))
+    if (category_filter != kAllCategories && item.category != category_filter && !item.tags.contains(category_filter))
       continue;
 
-    const String searchable = (preset.getFileNameWithoutExtension() + " " +
-                               library + " " + bank + " " + category + " " + tags.joinIntoString(" ") + " " +
-                               preset.getRelativePathFrom(data_directory) + " " +
-                               LoadSave::getAuthorFromFile(preset) + " " +
-                               LoadSave::getStyleFromFile(preset)).toLowerCase();
-    if (filter.isEmpty() || searchable.contains(filter))
-      filtered_presets_.add(preset);
+    if (filter.isEmpty() || item.searchable.contains(filter))
+      filtered_presets_.add(item.file);
   }
 
   const String previous_path = last_preset_path.isNotEmpty() ? last_preset_path
@@ -5746,12 +6425,10 @@ void SynthEditor::filterPresetList() {
   preset_selector_.clear(dontSendNotification);
   for (int i = 0; i < filtered_presets_.size(); ++i) {
     const auto& preset = filtered_presets_.getReference(i);
-    String label = preset.getFileNameWithoutExtension() + " — " + presetLibraryName(preset) +
-                   " — " + presetBankName(preset);
-    const String category = presetCategoryName(preset);
-    if (category.isNotEmpty() && category != "Uncategorized")
-      label += " — " + category;
-    preset_selector_.addItem(label, i + 1);
+    if (const auto* item = presetItemForFile(preset))
+      preset_selector_.addItem(item->label, i + 1);
+    else
+      preset_selector_.addItem(preset.getFileNameWithoutExtension(), i + 1);
   }
   if (!filtered_presets_.isEmpty()) {
     int selected = 0;
@@ -5767,10 +6444,47 @@ void SynthEditor::filterPresetList() {
   updatePresetSummary();
 }
 
+void SynthEditor::schedulePresetFilterUpdate(bool rebuildFilters) {
+  preset_filter_rebuild_pending_ = preset_filter_rebuild_pending_ || rebuildFilters;
+  if (preset_filter_update_pending_)
+    return;
+
+  preset_filter_update_pending_ = true;
+  Component::SafePointer<SynthEditor> safe_this(this);
+  MessageManager::callAsync([safe_this] {
+    if (safe_this == nullptr)
+      return;
+
+    const bool rebuild = safe_this->preset_filter_rebuild_pending_;
+    safe_this->preset_filter_update_pending_ = false;
+    safe_this->preset_filter_rebuild_pending_ = false;
+    if (!safe_this->preset_list_loaded_)
+      return;
+
+    if (rebuild)
+      safe_this->populatePresetFilters();
+    safe_this->filterPresetList();
+  });
+}
+
 void SynthEditor::updatePresetSummary() {
   const String current = synth_.getPresetName().isEmpty() ? "Untitled" : synth_.getPresetName();
   if (preset_name_editor_.getText().trim().isEmpty() && current != "Untitled")
     preset_name_editor_.setText(current, false);
+
+  if (!preset_list_loaded_) {
+    const String summary = "Current preset: " + current +
+                           ". Atlas resources path: " + LoadSave::getDataDirectory().getFullPathName() +
+                           (preset_list_loading_ ?
+                              ". Preset list loading in the background. Autoload preset when scrolling is " :
+                              ". Preset list not loaded yet. Open the Preset menu or focus the preset browser to scan presets. Autoload preset when scrolling is ") +
+                           (preset_preview_.getToggleState() ? "on." : "off.");
+    preset_summary_.setText(summary, dontSendNotification);
+    preset_summary_.setDescription(summary);
+    if (auto* handler = preset_summary_.getAccessibilityHandler())
+      handler->notifyAccessibilityEvent(AccessibilityEvent::titleChanged);
+    return;
+  }
 
   const String summary = "Current preset: " + current +
                          ". Atlas resources path: " + LoadSave::getDataDirectory().getFullPathName() +
@@ -5790,6 +6504,8 @@ void SynthEditor::updatePresetSummary() {
 }
 
 void SynthEditor::showPresetMenu() {
+  ensurePresetListLoaded();
+
   PopupMenu menu;
   menu.addSectionHeader("Preset actions");
   menu.addItem(2, "Refresh preset list");
@@ -5845,17 +6561,23 @@ void SynthEditor::selectPresetFile(const File& file) {
   if (!file.existsAsFile())
     return;
   last_preset_path = file.getFullPathName();
-  String library = presetLibraryName(file);
+  if (!preset_list_loaded_) {
+    updatePresetSummary();
+    return;
+  }
+
+  const auto* item = presetItemForFile(file);
+  const String library = item != nullptr ? item->library : presetLibraryName(file);
   if (preset_libraries_.contains(library)) {
     last_preset_library = library;
     populatePresetFilters();
   }
-  String bank = presetBankName(file);
+  const String bank = item != nullptr ? item->bank : presetBankName(file);
   if (preset_banks_.contains(bank)) {
     last_preset_bank = bank;
     populatePresetFilters();
   }
-  String category = presetCategoryName(file);
+  const String category = item != nullptr ? item->category : presetCategoryName(file);
   if (preset_categories_.contains(category)) {
     last_preset_category = category;
     preset_category_.setSelectedItemIndex(preset_categories_.indexOf(category), dontSendNotification);
@@ -5865,12 +6587,14 @@ void SynthEditor::selectPresetFile(const File& file) {
 
 
 void SynthEditor::loadSelectedPreset() {
+  ensurePresetListLoaded();
+
   const int index = preset_selector_.getSelectedItemIndex();
   if (!isPositiveAndBelow(index, filtered_presets_.size())) {
     postPluginAnnouncement("Choose a preset first", AccessibilityHandler::AnnouncementPriority::high);
     return;
   }
-  loadPresetFile(filtered_presets_[index]);
+  loadPresetFile(filtered_presets_[index], false, false);
 }
 
 void SynthEditor::choosePresetFile() {
@@ -5880,12 +6604,12 @@ void SynthEditor::choosePresetFile() {
                                [this](const FileChooser& chooser) {
     const auto file = chooser.getResult();
     if (file.existsAsFile())
-      loadPresetFile(file);
+      loadPresetFile(file, false, true);
     preset_chooser_.reset();
   });
 }
 
-void SynthEditor::loadPresetFile(const File& file, bool preview) {
+void SynthEditor::loadPresetFile(const File& file, bool preview, bool updateBrowserFilters) {
   const String parameter_id = focusedParameterId();
   const String accessible_title = focusedAccessibleTitle();
   auto* persistent_focus = persistentFocusedComponent();
@@ -5898,14 +6622,18 @@ void SynthEditor::loadPresetFile(const File& file, bool preview) {
   last_preset_path = file.getFullPathName();
   synth_.updateHostDisplay();
   updateFullGui();
-  selectPresetFile(file);
+  if (updateBrowserFilters)
+    selectPresetFile(file);
+  else
+    filterPresetList();
   updatePresetSummary();
   restoreFocusAfterRebuild(parameter_id, persistent_focus, accessible_title);
   if (preview || persistent_focus == &preset_selector_) {
+    Component::SafePointer<SynthEditor> safe_this(this);
     Component::SafePointer<Component> preset_list_focus(&preset_selector_);
-    MessageManager::callAsync([this, preset_list_focus] {
-      if (preset_list_focus != nullptr && preset_list_focus->isShowing()) {
-        ensureComponentVisible(preset_list_focus.getComponent());
+    MessageManager::callAsync([safe_this, preset_list_focus] {
+      if (safe_this != nullptr && preset_list_focus != nullptr && preset_list_focus->isShowing()) {
+        safe_this->ensureComponentVisible(preset_list_focus.getComponent());
         preset_list_focus->grabKeyboardFocus();
       }
     });
@@ -8105,15 +8833,7 @@ void SynthEditor::refreshVisibleModulationLabels() {
     if (!id.startsWith("modulation_"))
       continue;
 
-    const String rest = id.fromFirstOccurrenceOf("modulation_", false, false);
-    const int slot = rest.upToFirstOccurrenceOf("_", false, false).getIntValue();
-    if (slot <= 0)
-      continue;
-
-    const String suffix = rest.fromFirstOccurrenceOf("_", false, false);
-    String title = modulationSlotTitle(slot);
-    if (suffix.isNotEmpty())
-      title += ", " + readableId(suffix);
+    const String title = modulationControlTitle(id);
     row->setAccessibleName(title, "Adjust " + title);
   }
 
@@ -8182,6 +8902,7 @@ void SynthEditor::showSelectedModulationParameters() {
     control->setExtraCommandCallback([this](const String& parameterId, const KeyPress& key, Component& target) {
       return handleMacroShortcut(parameterId, key, target);
     });
+    control->setAccessibleName(modulationControlTitle(bridge->getParameterId()));
     control->setBounds(0, y, jmax(620, viewport_.getMaximumVisibleWidth()), 48);
     rows_container_.addAndMakeVisible(control.get());
     rows_.push_back(std::move(control));
@@ -8470,10 +9191,11 @@ String SynthEditor::wavetableEditorSummary(int oscillator) const {
 void SynthEditor::setWavetableEditorVisible(int oscillator, bool visible) {
   if (!isPositiveAndBelow(oscillator, vital::kNumOscillators))
     return;
+  if (wavetable_editor_visible_[oscillator] == visible)
+    return;
 
   const String parameter_id = focusedParameterId();
   const String focused_title = focusedAccessibleTitle();
-  auto* persistent_focus = persistentFocusedComponent();
   String restore_title = focused_title;
   if (focused_title == "Show wavetable editor" && visible)
     restore_title = "Hide wavetable editor";
@@ -8482,14 +9204,20 @@ void SynthEditor::setWavetableEditorVisible(int oscillator, bool visible) {
 
   wavetable_editor_visible_[oscillator] = visible;
   const String section = "Oscillator " + String(oscillator + 1);
-  if (show_all_sections_)
-    showAllSections(false);
-  else
-    selectSectionByName(section, false);
-  restoreFocusAfterRebuild(parameter_id, persistent_focus, restore_title);
+  Component::SafePointer<SynthEditor> safe_this(this);
+  MessageManager::callAsync([safe_this, parameter_id, restore_title, section, visible] {
+    if (safe_this == nullptr)
+      return;
 
-  postPluginAnnouncement(visible ? "Wavetable editor shown" : "Wavetable editor hidden",
-                                         AccessibilityHandler::AnnouncementPriority::medium);
+    if (safe_this->show_all_sections_)
+      safe_this->showAllSections(false);
+    else
+      safe_this->selectSectionByName(section, false);
+    safe_this->restoreFocusAfterRebuild(parameter_id, nullptr, restore_title, section);
+
+    postPluginAnnouncement(visible ? "Wavetable editor shown" : "Wavetable editor hidden",
+                                           AccessibilityHandler::AnnouncementPriority::medium);
+  });
 }
 
 void SynthEditor::applyWavetableHarmonicEdit(int oscillator, int frame, bool allFrames,

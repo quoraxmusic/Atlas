@@ -1,92 +1,104 @@
 # Atlas
 
-Atlas is my accessible macOS build of Vital.
+Atlas is an accessible software synthesizer based on the open source code of [Vital.](https://github.com/mtytel/vital)
 
-It keeps the sound and workflow that made Vital useful, but changes the parts that made it hard or impossible to use with VoiceOver. The main idea is simple: every important part of the synth should be reachable, named clearly, and usable from the keyboard without having to guess what the visual interface is doing.
+The goal of Atlas is to keep the power and flexibility of Vital while making the instrument fully usable with screen readers on both Windows and macOS. It adds a  keyboard focused UI, accessible editing tools, and several new synthesis, modulation, routing, and effects features.
 
-This is based on the open source Vital codebase. It is not the official Vital app, and presets made here are meant for Atlas.
+## Main Features
 
-## What Atlas Adds
+Atlas includes 4 wavetable oscillators, an improved sample oscillator, a granular oscillator, expanded modulation, more effects, and a more flexible routing system.
 
-- A VoiceOver-friendly layout with clear groups for presets, oscillators, routing, filters, envelopes, LFOs, effects, modulations, macros, zones, and global controls.
-- Six sound sources: four wavetable oscillators, one sample oscillator, and one granular oscillator.
-- Two filters with accessible type, style, mode, routing, and filter destination controls.
-- Six envelopes, eight LFOs, four random modulators, and sixteen renamable macros.
-- Accessible LFO editing, including point editing, curve choices, grid controls, and keyboard-driven navigation.
-- Better sample and wavetable browsing, with load, previous, next, and folder browser controls.
-- Optional scanning of the Downloads folder for Atlas presets, so presets people send you can be picked up without manual file digging.
-- A better preset browser with Library, Bank, Category, and preset list filters.
-- An Atlas save patch form inside the plugin, with name, author, bank, category, and comma-separated tags.
-- Preset tags are saved in `.atp` files and can be used as browser categories.
-- Three effect busses, bus routing, source routing, filter routing, main effects routing, and direct out options.
-- More effects than the original Vital build: utility, limiter, frequency shifter, phase shift, and dimension expander, alongside the original chorus, compressor, delay, distortion, EQ, filter, flanger, phaser, and reverb.
-- Keyboard shortcuts to jump around the synth faster instead of tabbing through everything.
-- AU and VST3 builds for macOS.
+The sample oscillator includes control over sample start and end points, retrigger behavior, high and low cut filters, and looping windows.
+
+The granular oscillator includes 2 playback modes, playthrough and manual.
+
+Atlas also expands the modulation system with 8 LFOs, 6 envelopes, 4 random modulators, and 16 macros. Macros can be renamed as well.
+
+## Oscillators
+
+Atlas includes 4 wavetable oscillators.
+
+It also includes an improved sample oscillator with additional controls for start position, end position, retrigger modes, filtering, and loop windows.
+
+The granular oscillator adds another sound source with playthrough and manual playback modes.
 
 ## Accessibility
 
-Atlas has a separate accessible layout instead of trying to make VoiceOver follow the original visual UI. Controls are grouped by the way you actually use the synth: oscillators together, filters together, busses together, and so on.
+Accessibility is one of the main reasons Atlas exists.
 
-Sliders can be adjusted from the keyboard, values can be typed in, defaults can be restored, macros can be renamed, and modulation assignment is designed to be reachable without using a mouse.
+The interface is built to be usable with screen readers on both Windows and macOS. Keyboard shortcuts are included for easier navigation, editing, and sound design.
 
-The preset area is also meant to work from the keyboard: you can filter by library, bank, and category, save patches without using the operating system save dialog, and turn on autoload when scrolling if you want presets to load as you move through the list.
+## Accessible LFO Editor
 
-The goal is not just that VoiceOver can see the plugin. The goal is that the synth can actually be programmed.
+The LFO editor can be used fully from the keyboard.
 
-## Install
+You can add and remove points, select multiple points, make non continuous selections, change point values, adjust curves between points, move points in time, change LFO smoothing, set LFO timing in synced or free mode, and adjust the starting phase.
 
-Download the latest `.pkg` from the releases page and run it.
+The goal is to make detailed LFO design possible for screen reader users without reducing the depth of the original LFO system.
 
-The installer includes:
+## Accessible Wavetable Editor
 
-- Audio Unit
-- VST3
-- the accessible layout guide
+Atlas includes an accessible wavetable editor that can be controlled from the keyboard.
 
-The guide is installed to:
+You can adjust harmonics, change harmonic intensity, remove the fundamental, set harmonics, and add harmonics in an accessible way.
 
-`~/Documents/Alessio Plugins/Atlas/Accessible Layout Guide.html`
+This makes it possible to shape wavetables directly without needing to rely on visual editing.
 
-More details are in [INSTALL.md](INSTALL.md).
+## Modulation
 
-## Build
+Atlas includes:
 
-Atlas builds with CMake and JUCE on macOS.
+* 8 LFOs
+* 6 envelopes
+* 4 random modulators
+* 16 renamable macros
 
-```sh
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release --target Atlas_All -j2
-./installer/build-pkg.sh
-```
+The modulation system is designed to give enough flexibility for complex patches while keeping the controls reachable and understandable through keyboard and screen reader workflows.
 
-More details are in [BUILDING.md](BUILDING.md).
+## Effects
 
-## File Formats
+Atlas includes 14 effects in total.
 
-- Presets: `.atp`
-- Banks: `.atb`
-- LFO/envelope shapes: `.ats`
-- FX presets: `.atf`
-- Wavetables: `.att`
+It includes Vital's 9 stock effects:
+* Delay
+* Chorus
+* Compressor
+* EQ
+* Filter
+* Flanger
+* Phaser
+* Distortion
+* Reverb
 
-Older `.vital`, `.vitalbank`, `.vitallfo`, and `.vitaltable` files can still be loaded, but Atlas presets are not meant to be loaded back into Vital.
+Atlas also adds:
+* Frequency shifter
+* Limiter
+* Utility
+* Phase shift (inspired by disperser style phase processing)
+* Dimension expander
 
-Atlas content lives in:
+The Utility effect includes control over input gain, output gain, filtering, and stereo width.
 
-`~/Documents/Alessio Plugins/Atlas`
+## Routing
 
-User presets are saved under:
+Atlas includes a more flexible routing system than the original Vital structure.
 
-`~/Documents/Alessio Plugins/Atlas/User/Presets`
+There are 3 busses, which can be sent to the main effects, direct out, or used as part of more complex routing setups.
 
-## Notes
+Oscillators can be routed directly to filters, busses, main effects, or direct out.
 
-- Release builds are strongly recommended. Debug builds can use much more CPU.
-- Atlas does not connect to Vital accounts, the Vital store, or Vital online services.
-- Factory Vital preset content is not included.
+Filters can also be routed to busses, main effects, or direct out, allowing more flexible sound design chains.
+
+This makes it possible to build more advanced patches, layered sounds, parallel processing chains, and cleaner output routing.
 
 ## License
 
-Atlas follows Vital's GPLv3 license. See [LICENSE](LICENSE).
+Atlas is based on Vital and is licensed under the GPL 3.0 license.
 
-Do not use the Vital name, Vital Audio name, Matt Tytel name, or original Vital branding to market this build.
+Please see the license file for more details.
+
+## Important Note About Vital Content
+
+Vital wavetables and samples are not included in this GitHub repository.
+
+Atlas is based on Vital's open source code, but this repository does not redistribute Vital's factory wavetables or sample content.

@@ -239,8 +239,10 @@ namespace vital {
     VITAL_ASSERT(vital::utils::isFinite(change.destination_scale));
 
     Processor* destination = change.mono_destination;
-    bool polyphonic = change.source->owner->isPolyphonic() && change.poly_destination;
+    const bool source_polyphonic = change.source->owner->isPolyphonic();
+    bool polyphonic = source_polyphonic && change.poly_destination;
     change.modulation_processor->setPolyphonicModulation(polyphonic);
+    change.modulation_processor->setCollapsePolyphonicSource(source_polyphonic && !polyphonic);
     voice_handler_->enableModulationConnection(change.modulation_processor);
     if (polyphonic) {
       destination = change.poly_destination;
@@ -270,6 +272,7 @@ namespace vital {
 
   void SoundEngine::disconnectModulation(const modulation_change& change) {
     change.modulation_processor->setDestinationScale(0.0f);
+    change.modulation_processor->setCollapsePolyphonicSource(false);
 
     Processor* destination = change.mono_destination;
     if (change.source->owner->isPolyphonic() && change.poly_destination)
