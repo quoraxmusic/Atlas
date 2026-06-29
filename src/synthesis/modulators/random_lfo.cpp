@@ -34,6 +34,10 @@ namespace {
 }
 
 namespace vital {
+  force_inline poly_float randomLfoRateMultiplier(const poly_float& rate_x10) {
+    return utils::maskLoad(poly_float(1.0f), poly_float(10.0f), poly_float::greaterThan(rate_x10, 0.5f));
+  }
+
   RandomLfo::RandomLfo() : Processor(kNumInputs, 1), random_generator_(-1.0f, 1.0f) {
     last_sync_ = std::make_shared<double>();
     sync_seconds_ = std::make_shared<double>();
@@ -66,7 +70,7 @@ namespace vital {
   }
 
   poly_int RandomLfo::updatePhase(RandomState* state, int num_samples) {
-    poly_float frequency = input(kFrequency)->at(0);
+    poly_float frequency = input(kFrequency)->at(0) * randomLfoRateMultiplier(input(kRateX10)->at(0));
     poly_float phase_delta = frequency * (1.0f / getSampleRate()) * num_samples;
     bool mono = input(kStereo)->at(0)[0] == 0.0f;
     poly_mask new_random_mask = 0;
@@ -79,7 +83,7 @@ namespace vital {
       }
     }
     else {
-      poly_float frequency = input(kFrequency)->at(0);
+      poly_float frequency = input(kFrequency)->at(0) * randomLfoRateMultiplier(input(kRateX10)->at(0));
       doReset(state, mono, frequency);
 
       poly_float start_offset = state->offset;
@@ -232,7 +236,7 @@ namespace vital {
     else
       state1 -= (state1 * 0.5f) & stereo_equal_mask & constants::kLeftMask;
 
-    poly_float frequency = input(kFrequency)->at(0);
+    poly_float frequency = input(kFrequency)->at(0) * randomLfoRateMultiplier(input(kRateX10)->at(0));
     poly_float t = utils::min(kMaxFrequency, frequency * (0.5f / getSampleRate()));
 
     poly_float* dest = output()->buffer;

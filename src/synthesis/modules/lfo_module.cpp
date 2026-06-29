@@ -31,6 +31,7 @@ namespace vital {
 
   void LfoModule::init() {
     Output* free_frequency = createPolyModControl(prefix_ + "_frequency");
+    Output* rate_x10 = createPolyModControl(prefix_ + "_rate_x10");
     Output* phase = createPolyModControl(prefix_ + "_phase");
     Output* fade = createPolyModControl(prefix_ + "_fade_time");
     Output* delay = createPolyModControl(prefix_ + "_delay_time");
@@ -47,6 +48,7 @@ namespace vital {
     lfo_->useOutput(output(kOscPhase), SynthLfo::kOscPhase);
     lfo_->useOutput(output(kOscFrequency), SynthLfo::kOscFrequency);
     lfo_->plug(frequency, SynthLfo::kFrequency);
+    lfo_->plug(rate_x10, SynthLfo::kRateX10);
     lfo_->plug(phase, SynthLfo::kPhase);
     lfo_->plug(stereo_phase, SynthLfo::kStereoPhase);
     lfo_->plug(sync_type, SynthLfo::kSyncType);

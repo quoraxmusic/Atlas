@@ -43,6 +43,7 @@ namespace vital {
 
       enum {
         kFrequency,
+        kRateX10,
         kAmplitude,
         kReset,
         kSync,
@@ -85,4 +86,3 @@ namespace vital {
       JUCE_LEAK_DETECTOR(RandomLfo)
   };
 } // namespace vital
-

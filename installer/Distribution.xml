@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
   <title>Atlas</title>
-  <options customize="always" require-scripts="true" rootVolumeOnly="true"/>
+  <options customize="always" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64"/>
   <choices-outline>
     <line choice="choice.docs"/>
     <line choice="choice.au"/>

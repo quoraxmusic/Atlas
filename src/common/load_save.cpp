@@ -218,6 +218,7 @@ json LoadSave::stateToJson(SynthBase* synth, const CriticalSection& critical_sec
   data["author"] = synth->getAuthor().toStdString();
   data["comments"] = synth->getComments().toStdString();
   data["preset_style"] = synth->getStyle().toStdString();
+  data["preset_tags"] = synth->getTags().toStdString();
   for (int i = 0; i < vital::kNumMacros; ++i) {
     std::string name = synth->getMacroName(i).toStdString();
     data["macro" + std::to_string(i + 1)] = name;
@@ -386,6 +387,23 @@ void LoadSave::loadSaveState(std::map<std::string, String>& state, json data) {
     state["style"] = style;
   }
 
+  if (data.count("preset_tags")) {
+    if (data["preset_tags"].is_string()) {
+      std::string tags = data["preset_tags"];
+      state["tags"] = tags;
+    }
+    else if (data["preset_tags"].is_array()) {
+      StringArray tags;
+      for (const auto& tag : data["preset_tags"]) {
+        if (tag.is_string()) {
+          std::string tag_text = tag;
+          tags.add(String(tag_text).trim());
+        }
+      }
+      state["tags"] = tags.joinIntoString(", ");
+    }
+  }
+
   for (int i = 0; i < vital::kNumMacros; ++i) {
     std::string key = "macro" + std::to_string(i + 1);
     if (data.count(key) && data[key].is_string()) {
@@ -402,6 +420,7 @@ void LoadSave::initSaveInfo(std::map<std::string, String>& save_info) {
   save_info["author"] = "";
   save_info["comments"] = "";
   save_info["style"] = "";
+  save_info["tags"] = "";
 
   for (int i = 0; i < vital::kNumMacros; ++i)
     save_info["macro" + std::to_string(i + 1)] = "MACRO " + std::to_string(i + 1);
@@ -1270,6 +1289,54 @@ String LoadSave::getStyleFromFile(const File& file) {
   return "";
 }
 
+String LoadSave::getTagsFromFile(const File& file) {
+  static constexpr int kMetadataScanSize = 16384;
+  FileInputStream file_stream(file);
+  if (!file_stream.openedOk())
+    return "";
+
+  MemoryBlock memory_block;
+  file_stream.readIntoMemoryBlock(memory_block, kMetadataScanSize);
+  const String text = memory_block.toString();
+  const String key = "\"preset_tags\"";
+  const int key_index = text.indexOf(key);
+  if (key_index < 0)
+    return "";
+
+  const int colon = text.indexOfChar(key_index + key.length(), ':');
+  if (colon < 0)
+    return "";
+
+  int value_start = colon + 1;
+  while (value_start < text.length() && CharacterFunctions::isWhitespace(text[value_start]))
+    ++value_start;
+
+  if (value_start >= text.length())
+    return "";
+
+  if (text[value_start] == '"') {
+    const int value_end = text.indexOfChar(value_start + 1, '"');
+    if (value_end > value_start)
+      return text.substring(value_start + 1, value_end);
+  }
+  else if (text[value_start] == '[') {
+    const int value_end = text.indexOfChar(value_start + 1, ']');
+    if (value_end > value_start) {
+      StringArray tags;
+      StringArray tokens;
+      tokens.addTokens(text.substring(value_start + 1, value_end), ",", "");
+      for (auto token : tokens) {
+        token = token.trim().unquoted().trim();
+        if (token.isNotEmpty())
+          tags.add(token);
+      }
+      return tags.joinIntoString(", ");
+    }
+  }
+
+  return "";
+}
+
 std::string LoadSave::getAuthor(json data) {
   if (data.count("author"))
     return data["author"];
@@ -2043,7 +2110,7 @@ int LoadSave::scanDownloadsForPresets() {
       continue;
 
     if (preset.copyFileTo(target))
-      imported++;
+      ++imported;
     else
       writeErrorLog("Failed to copy downloaded preset: " + preset.getFullPathName());
   }

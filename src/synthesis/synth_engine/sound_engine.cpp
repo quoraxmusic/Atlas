@@ -29,8 +29,29 @@
 #include "value_switch.h"
 
 #include <cmath>
+#include <set>
 
 namespace vital {
+  namespace {
+    poly_float strongestMonoLane(poly_float values) {
+      const mono_float maximum = utils::maxFloat(values);
+      const mono_float minimum = utils::minFloat(values);
+      return poly_float(std::abs(minimum) > std::abs(maximum) ? minimum : maximum);
+    }
+
+    void collapsePolyphonicModulationToMono(ModulationConnectionProcessor* modulation, int num_samples) {
+      poly_float* buffer = modulation->output()->buffer;
+      if (modulation->isControlRate()) {
+        buffer[0] = strongestMonoLane(buffer[0]);
+      }
+      else {
+        for (int i = 0; i < num_samples; ++i)
+          buffer[i] = strongestMonoLane(buffer[i]);
+      }
+      modulation->output()->trigger_value = buffer[0];
+    }
+  }
+
   class BusRouter : public Processor {
     public:
       enum {
@@ -239,8 +260,10 @@ namespace vital {
     VITAL_ASSERT(vital::utils::isFinite(change.destination_scale));
 
     Processor* destination = change.mono_destination;
-    bool polyphonic = change.source->owner->isPolyphonic() && change.poly_destination;
+    const bool source_polyphonic = change.source->owner->isPolyphonic();
+    bool polyphonic = source_polyphonic && change.poly_destination;
     change.modulation_processor->setPolyphonicModulation(polyphonic);
+    change.modulation_processor->setCollapsePolyphonicSource(source_polyphonic && !polyphonic);
     voice_handler_->enableModulationConnection(change.modulation_processor);
     if (polyphonic) {
       destination = change.poly_destination;
@@ -270,6 +293,8 @@ namespace vital {
 
   void SoundEngine::disconnectModulation(const modulation_change& change) {
     change.modulation_processor->setDestinationScale(0.0f);
+    change.modulation_processor->setCollapsePolyphonicSource(false);
+    change.modulation_processor->setRefreshSourceWhenIdle(false);
 
     Processor* destination = change.mono_destination;
     if (change.source->owner->isPolyphonic() && change.poly_destination)
@@ -351,9 +376,18 @@ namespace vital {
 
     if (getNumActiveVoices() == 0) {
       CircularQueue<ModulationConnectionProcessor*>& connections = voice_handler_->enabledModulationConnection();
+      std::set<Processor*> refreshed_idle_sources;
       for (ModulationConnectionProcessor* modulation : connections) {
-        if (!modulation->isInputSourcePolyphonic() || modulation->processWhenIdle())
+        if (!modulation->isInputSourcePolyphonic() || modulation->processWhenIdle()) {
+          if (modulation->refreshSourceWhenIdle()) {
+            Processor* source_owner = modulation->input(ModulationConnectionProcessor::kModulationInput)->source->owner;
+            if (source_owner != nullptr && refreshed_idle_sources.insert(source_owner).second)
+              source_owner->process(num_samples);
+          }
           modulation->process(num_samples);
+          if (modulation->collapsesPolyphonicSource())
+            collapsePolyphonicModulationToMono(modulation, num_samples);
+        }
       }
     }
 

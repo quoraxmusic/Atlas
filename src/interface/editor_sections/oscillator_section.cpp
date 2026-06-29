@@ -63,7 +63,11 @@ namespace {
     "FM <- SAMPLE",
     "RM <- OSC",
     "RM <- OSC",
-    "RM <- SAMPLE"
+    "RM <- SAMPLE",
+    "FM <- OSC",
+    "FM <- GRAN",
+    "RM <- OSC",
+    "RM <- GRAN"
   };
 
   const std::string kLanguageNames[] = {
@@ -147,6 +151,8 @@ namespace {
       return " " + String(1 + vital::ProducersModule::getFirstModulationIndex(index));
     if (type == vital::SynthOscillator::kFmOscillatorB || type == vital::SynthOscillator::kRmOscillatorB)
       return " " + String(1 + vital::ProducersModule::getSecondModulationIndex(index));
+    if (type == vital::SynthOscillator::kFmOscillatorC || type == vital::SynthOscillator::kRmOscillatorC)
+      return " " + String(1 + vital::ProducersModule::getThirdModulationIndex(index));
 
     return "";
   }
@@ -1024,7 +1030,8 @@ void OscillatorSection::quantizeUpdated() {
 
 void OscillatorSection::resetOscillatorModulationDistortionType() {
   if (vital::SynthOscillator::isFirstModulation(current_distortion_type_) ||
-      vital::SynthOscillator::isSecondModulation(current_distortion_type_)) {
+      vital::SynthOscillator::isSecondModulation(current_distortion_type_) ||
+      vital::SynthOscillator::isThirdModulation(current_distortion_type_)) {
     current_distortion_type_ = vital::SynthOscillator::kNone;
     notifyDistortionTypeChange();
   }
@@ -1183,4 +1190,3 @@ void OscillatorSection::notifyDestinationChange() {
   if (parent)
     parent->getSynth()->valueChangedInternal(destination_control_name_, current_destination_);
 }
-

@@ -48,12 +48,28 @@ namespace vital {
         kNumOutputs
       };
 
+      static force_inline int getModulationIndex(int index, int source_slot) {
+        for (int i = 0, slot = 0; i < kNumOscillators; ++i) {
+          if (i == index)
+            continue;
+          if (slot == source_slot)
+            return i;
+          ++slot;
+        }
+
+        return 0;
+      }
+
       static force_inline int getFirstModulationIndex(int index) {
-        return index == 0 ? 1 : 0;
+        return getModulationIndex(index, 0);
       }
 
       static force_inline int getSecondModulationIndex(int index) {
-        return index == 1 ? 2 : (getFirstModulationIndex(index) + 1);
+        return getModulationIndex(index, 1);
+      }
+
+      static force_inline int getThirdModulationIndex(int index) {
+        return getModulationIndex(index, 2);
       }
 
       ProducersModule();

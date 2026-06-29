@@ -133,4 +133,3 @@ class SynthPresetSelector : public SynthSection,
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SynthPresetSelector)
 };
-

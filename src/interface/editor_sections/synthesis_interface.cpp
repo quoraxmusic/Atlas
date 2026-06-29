@@ -99,6 +99,8 @@ void SynthesisInterface::distortionTypeChanged(OscillatorSection* section, int d
       index = vital::ProducersModule::getFirstModulationIndex(index);
     else if (vital::SynthOscillator::isSecondModulation(type))
       index = vital::ProducersModule::getSecondModulationIndex(index);
+    else if (vital::SynthOscillator::isThirdModulation(type))
+      index = vital::ProducersModule::getThirdModulationIndex(index);
     else
       return;
   }
@@ -140,4 +142,3 @@ void SynthesisInterface::sampleDestinationChanged(SampleSection* section, int de
   filter_section_1_->setSampleInput(filter1_on);
   filter_section_2_->setSampleInput(filter2_on);
 }
-

@@ -29,7 +29,17 @@
 #include "value_switch.h"
 #include "modulation_connection_processor.h"
 
+#include <cmath>
+
 namespace vital {
+  namespace {
+    poly_float strongestMonoLane(poly_float values, poly_mask mask) {
+      poly_float masked = values & mask;
+      const mono_float maximum = utils::maxFloat(masked);
+      const mono_float minimum = utils::minFloat(masked);
+      return poly_float(std::abs(minimum) > std::abs(maximum) ? minimum : maximum);
+    }
+  }
 
   SynthVoiceHandler::SynthVoiceHandler(Output* beats_per_second) :
       VoiceHandler(0, kMaxPolyphony), producers_(nullptr), beats_per_second_(beats_per_second),
@@ -350,7 +360,15 @@ namespace vital {
 
       for (ModulationConnectionProcessor* processor : enabled_modulation_processors_) {
         poly_float* buffer = processor->output()->buffer;
-        if (processor->isControlRate() || processor->isPolyphonicModulation()) {
+        if (processor->collapsesPolyphonicSource()) {
+          if (processor->isControlRate())
+            buffer[0] = strongestMonoLane(buffer[0], last_active_voice_mask_);
+          else {
+            for (int i = 0; i < num_samples; ++i)
+              buffer[i] = strongestMonoLane(buffer[i], last_active_voice_mask_);
+          }
+        }
+        else if (processor->isControlRate() || processor->isPolyphonicModulation()) {
           poly_float masked_value = buffer[0] & last_active_voice_mask_;
           buffer[0] = masked_value + utils::swapVoices(masked_value);
         }

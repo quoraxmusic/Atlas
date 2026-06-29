@@ -131,6 +131,10 @@ namespace vital {
         kRmOscillatorA,
         kRmOscillatorB,
         kRmSample,
+        kFmOscillatorC,
+        kFmGranular,
+        kRmOscillatorC,
+        kRmGranular,
         kNumDistortionTypes
       };
 
@@ -155,6 +159,10 @@ namespace vital {
 
       static bool isSecondModulation(int type) {
         return type == kFmOscillatorB || type == kRmOscillatorB;
+      }
+
+      static bool isThirdModulation(int type) {
+        return type == kFmOscillatorC || type == kRmOscillatorC;
       }
 
       static constexpr int kMaxUnison = 16;
@@ -222,7 +230,9 @@ namespace vital {
 
       void setFirstOscillatorOutput(Output* oscillator) { first_mod_oscillator_ = oscillator; }
       void setSecondOscillatorOutput(Output* oscillator) { second_mod_oscillator_ = oscillator; }
+      void setThirdOscillatorOutput(Output* oscillator) { third_mod_oscillator_ = oscillator; }
       void setSampleOutput(Output* sample) { sample_ = sample; }
+      void setGranularOutput(Output* granular) { granular_ = granular; }
 
       virtual void setOversampleAmount(int oversample) override {
         Processor::setOversampleAmount(oversample);
@@ -311,7 +321,9 @@ namespace vital {
       int wavetable_version_;
       Output* first_mod_oscillator_;
       Output* second_mod_oscillator_;
+      Output* third_mod_oscillator_;
       Output* sample_;
+      Output* granular_;
     
       poly_float fourier_frames1_[kNumBuffers + 1][kSpectralBufferSize];
       poly_float fourier_frames2_[kNumBuffers + 1][kSpectralBufferSize];

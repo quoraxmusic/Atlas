@@ -151,6 +151,7 @@ ChorusSection::ChorusSection(const String& name, const vital::output_map& mono_m
   filter_cutoff_ = std::make_unique<SynthSlider>("chorus_cutoff");
   addSlider(filter_cutoff_.get());
   filter_cutoff_->setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
+  setSliderHasHzAlternateDisplay(filter_cutoff_.get());
 
   filter_spread_ = std::make_unique<SynthSlider>("chorus_spread");
   addSlider(filter_spread_.get());

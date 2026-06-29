@@ -24,6 +24,11 @@
 #include <cmath>
 
 namespace vital {
+
+  force_inline poly_float lfoRateMultiplier(const poly_float& rate_x10) {
+    return utils::maskLoad(poly_float(1.0f), poly_float(10.0f), poly_float::greaterThan(rate_x10, 0.5f));
+  }
+
   SynthLfo::SynthLfo(LineGenerator* source) : Processor(kNumInputs, kNumOutputs), source_(source) {
     was_control_rate_ = true;
     sync_seconds_ = std::make_shared<double>();
@@ -51,7 +56,7 @@ namespace vital {
     trigger_delay_ = utils::maskLoad(trigger_delay_, trigger_delay, reset_mask);
 
     if (reset_mask.anyMask()) {
-      poly_float frequency = input(kFrequency)->at(0);
+      poly_float frequency = input(kFrequency)->at(0) * lfoRateMultiplier(input(kRateX10)->at(0));
 
       if (sync_type == kSync) {
         poly_float sync_phase = utils::getCycleOffsetFromSeconds(*sync_seconds_, frequency);
@@ -78,7 +83,7 @@ namespace vital {
 
     poly_float stereo_phase = input(kStereoPhase)->at(0);
     poly_float phase = input(kPhase)->at(0) + stereo_phase * poly_float(0.5f, -0.5f);
-    poly_float frequency = input(kFrequency)->at(0);
+    poly_float frequency = input(kFrequency)->at(0) * lfoRateMultiplier(input(kRateX10)->at(0));
     poly_float current_offset = control_rate_state_.offset;
     control_rate_state_.offset += frequency * time_passed;
 
@@ -408,7 +413,7 @@ namespace vital {
     else
       current_phase = utils::maskLoad(current_phase, audio_rate_state_.phase, getResetMask(kNoteTrigger));
 
-    poly_float frequency = input(kFrequency)->at(0);
+    poly_float frequency = input(kFrequency)->at(0) * lfoRateMultiplier(input(kRateX10)->at(0));
     float tick_time = 1.0f / getSampleRate();
     poly_float delta_offset = frequency * tick_time;
 

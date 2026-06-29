@@ -407,12 +407,16 @@ namespace strings {
     "Bend",
     "Squeeze",
     "Pulse",
-    "FM <- Osc",
-    "FM <- Osc",
-    "FM <- Sample",
-    "RM <- Osc",
-    "RM <- Osc",
-    "RM <- Sample"
+    "FM from Oscillator",
+    "FM from Oscillator",
+    "FM from Sample",
+    "Ring Mod from Oscillator",
+    "Ring Mod from Oscillator",
+    "Ring Mod from Sample",
+    "FM from Oscillator",
+    "FM from Granular",
+    "Ring Mod from Oscillator",
+    "Ring Mod from Granular"
   };
 
   const std::string kSpectralMorphNames[] = {

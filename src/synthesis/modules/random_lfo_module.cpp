@@ -28,6 +28,7 @@ namespace vital {
 
   void RandomLfoModule::init() {
     Output* free_frequency = createPolyModControl(prefix_ + "_frequency");
+    Output* rate_x10 = createPolyModControl(prefix_ + "_rate_x10");
     Value* style = createBaseControl(prefix_ + "_style");
     Value* stereo = createBaseControl(prefix_ + "_stereo");
     Value* sync_type = createBaseControl(prefix_ + "_sync_type");
@@ -36,6 +37,7 @@ namespace vital {
     lfo_->useInput(input(kNoteTrigger), RandomLfo::kReset);
     lfo_->useOutput(output());
     lfo_->plug(frequency, RandomLfo::kFrequency);
+    lfo_->plug(rate_x10, RandomLfo::kRateX10);
     lfo_->plug(style, RandomLfo::kStyle);
     lfo_->plug(stereo, RandomLfo::kStereo);
     lfo_->plug(sync_type, RandomLfo::kSync);

@@ -209,9 +209,10 @@ void SynthPresetSelector::showPopupMenu(Component* anchor) {
     options.addItem(kClearTuning, "Clear Tuning: " + getTuningName());
   
   options.addItem(-1, "");
-  bool scan_downloads = LoadSave::shouldScanDownloads();
-  std::string scan_label = scan_downloads ? "Scan Downloads on Startup: On" : "Scan Downloads on Startup: Off";
-  options.addItem(kToggleScanDownloads, scan_label, scan_downloads);
+  const bool scan_downloads = LoadSave::shouldScanDownloads();
+  options.addItem(kToggleScanDownloads,
+                  scan_downloads ? "Scan Downloads on Startup: On" : "Scan Downloads on Startup: Off",
+                  scan_downloads);
 
   options.addItem(-1, "");
   std::string logged_in_as = loggedInName();
@@ -439,7 +440,7 @@ void SynthPresetSelector::browsePresets() {
 }
 
 void SynthPresetSelector::toggleScanDownloads() {
-  bool enabled = !LoadSave::shouldScanDownloads();
+  const bool enabled = !LoadSave::shouldScanDownloads();
   LoadSave::saveScanDownloads(enabled);
 
   if (enabled) {

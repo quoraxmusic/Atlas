@@ -51,6 +51,8 @@ class SimpleEffectSection : public SynthSection {
       for (const char* slider_name : slider_names) {
         auto slider = std::make_unique<SynthSlider>(prefix + "_" + slider_name);
         addSlider(slider.get());
+        if (String(slider_name).contains("cutoff"))
+          setSliderHasHzAlternateDisplay(slider.get());
         sliders_.push_back(std::move(slider));
       }
     }

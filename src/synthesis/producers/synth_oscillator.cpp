@@ -574,7 +574,8 @@ namespace vital {
       Processor(kNumInputs, kNumOutputs), random_generator_(-1.0f, 1.0f),
       transpose_quantize_(0), last_quantized_transpose_(0.0f), last_quantize_ratio_(1.0f),
       unison_(1), active_oscillators_(2), wavetable_(wavetable), wavetable_version_(wavetable->getVersion()),
-      first_mod_oscillator_(nullptr), second_mod_oscillator_(nullptr), sample_(nullptr),
+      first_mod_oscillator_(nullptr), second_mod_oscillator_(nullptr), third_mod_oscillator_(nullptr),
+      sample_(nullptr), granular_(nullptr),
       fourier_frames1_(), fourier_frames2_() {
     pan_amplitude_ = 0.0f;
     center_amplitude_ = 0.0f;
@@ -1068,7 +1069,9 @@ namespace vital {
     switch (distortion_type) {
       case kFmOscillatorA:
       case kFmOscillatorB:
+      case kFmOscillatorC:
       case kFmSample:
+      case kFmGranular:
         for (int i = 0; i < num_values; ++i)
           values[i] *= values[i];
         break;
@@ -1286,11 +1289,17 @@ namespace vital {
         break;
       case kFmOscillatorA:
       case kFmOscillatorB:
+      case kFmOscillatorC:
       case kFmSample:
+      case kFmGranular:
         if (distortion_type == kFmOscillatorB)
           voice_block_.modulation_buffer = second_mod_oscillator_->buffer;
+        else if (distortion_type == kFmOscillatorC)
+          voice_block_.modulation_buffer = third_mod_oscillator_->buffer;
         else if (distortion_type == kFmSample)
           voice_block_.modulation_buffer = sample_->buffer;
+        else if (distortion_type == kFmGranular)
+          voice_block_.modulation_buffer = granular_->buffer;
         else
           voice_block_.modulation_buffer = first_mod_oscillator_->buffer;
         
@@ -1303,11 +1312,17 @@ namespace vital {
         break;
       case kRmOscillatorA:
       case kRmOscillatorB:
+      case kRmOscillatorC:
       case kRmSample:
+      case kRmGranular:
         if (distortion_type == kRmOscillatorB)
           voice_block_.modulation_buffer = second_mod_oscillator_->buffer;
+        else if (distortion_type == kRmOscillatorC)
+          voice_block_.modulation_buffer = third_mod_oscillator_->buffer;
         else if (distortion_type == kRmSample)
           voice_block_.modulation_buffer = sample_->buffer;
+        else if (distortion_type == kRmGranular)
+          voice_block_.modulation_buffer = granular_->buffer;
         else
           voice_block_.modulation_buffer = first_mod_oscillator_->buffer;
 

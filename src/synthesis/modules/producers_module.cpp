@@ -92,9 +92,12 @@ namespace vital {
     for (int i = 0; i < kNumOscillators; ++i) {
       int index1 = getFirstModulationIndex(i);
       int index2 = getSecondModulationIndex(i);
+      int index3 = getThirdModulationIndex(i);
       oscillators_[i]->oscillator()->setFirstOscillatorOutput(oscillators_[index1]->output(OscillatorModule::kRaw));
       oscillators_[i]->oscillator()->setSecondOscillatorOutput(oscillators_[index2]->output(OscillatorModule::kRaw));
+      oscillators_[i]->oscillator()->setThirdOscillatorOutput(oscillators_[index3]->output(OscillatorModule::kRaw));
       oscillators_[i]->oscillator()->setSampleOutput(sampler_->output(SampleModule::kRaw));
+      oscillators_[i]->oscillator()->setGranularOutput(granular_->output(GranularModule::kRaw));
     }
   }
 
@@ -139,8 +142,10 @@ namespace vital {
       OscillatorModule* module = oscillators_[index];
       int first_source = getFirstModulationIndex(index);
       int second_source = getSecondModulationIndex(index);
+      int third_source = getThirdModulationIndex(index);
       if ((!SynthOscillator::isFirstModulation(distortion_types[index]) || processed[first_source]) &&
           (!SynthOscillator::isSecondModulation(distortion_types[index]) || processed[second_source]) &&
+          (!SynthOscillator::isThirdModulation(distortion_types[index]) || processed[third_source]) &&
           !processed[index]) {
         num_processed++;
         processed[index] = true;
@@ -260,5 +265,6 @@ namespace vital {
       addZonedBuffer(bus3_output, granular, granular_zone_mask, num_samples);
     if (granular_direct_out)
       addZonedBuffer(direct_output, granular, granular_zone_mask, num_samples);
+
   }
 } // namespace vital

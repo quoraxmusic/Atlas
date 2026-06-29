@@ -25,6 +25,7 @@ namespace vital {
     public:
       enum {
         kFrequency,
+        kRateX10,
         kPhase,
         kAmplitude,
         kNoteTrigger,

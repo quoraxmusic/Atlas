@@ -20,8 +20,9 @@
 namespace vital {
 
   ModulationConnectionProcessor::ModulationConnectionProcessor(int index) :
-      SynthModule(kNumInputs, kNumOutputs), index_(index), polyphonic_(true), process_when_idle_(false),
-      current_value_(nullptr), bipolar_(nullptr), stereo_(nullptr) {
+      SynthModule(kNumInputs, kNumOutputs), index_(index), polyphonic_(true), collapse_polyphonic_source_(false),
+      process_when_idle_(false), refresh_source_when_idle_(false), current_value_(nullptr), bipolar_(nullptr),
+      stereo_(nullptr) {
     setControlRate(true);
 
     modulation_amount_ = 0.0f;
@@ -282,6 +283,8 @@ namespace vital {
     poly_float raw_modulation = (pre_modulation ^ sign_mask) * polarity_post_scale;
     output(kModulationPreScale)->buffer[0] = raw_modulation;
     output(kModulationOutput)->buffer[0] = raw_modulation * (*destination_scale_);
+    output(kModulationPreScale)->trigger_value = output(kModulationPreScale)->buffer[0];
+    output(kModulationOutput)->trigger_value = output(kModulationOutput)->buffer[0];
     VITAL_ASSERT(utils::isFinite(output()->buffer[0]));
   }
 } // namespace vital

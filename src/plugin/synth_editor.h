@@ -21,14 +21,37 @@
 #include "synth_gui_interface.h"
 
 #include <map>
+#include <unordered_map>
+#include <vector>
 
 class AccessibleParameterRow;
 class LineGenerator;
 class ValueBridge;
 
+struct PresetBrowserItem {
+  File file;
+  int64 file_size = 0;
+  int64 modified_time = 0;
+  String library;
+  String bank;
+  String category;
+  StringArray tags;
+  String author;
+  String style;
+  String label;
+  String searchable;
+};
+
 class PresetComboBox : public ComboBox {
   public:
     std::function<void()> onReturnKey;
+    std::function<void()> onFocusGained;
+
+    void focusGained(FocusChangeType cause) override {
+      ComboBox::focusGained(cause);
+      if (onFocusGained)
+        onFocusGained();
+    }
 
     bool keyPressed(const KeyPress& key) override {
       if (key.getKeyCode() == KeyPress::returnKey && onReturnKey) {
@@ -41,6 +64,21 @@ class PresetComboBox : public ComboBox {
 
 class AccessibleComboBox : public ComboBox {
   public:
+    std::function<bool(const KeyPress&)> onKeyPressed;
+    std::function<void()> onFocusGained;
+
+    void focusGained(FocusChangeType cause) override {
+      ComboBox::focusGained(cause);
+      if (onFocusGained)
+        onFocusGained();
+    }
+
+    bool keyPressed(const KeyPress& key) override {
+      if (onKeyPressed && onKeyPressed(key))
+        return true;
+      return ComboBox::keyPressed(key);
+    }
+
     std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 };
 
@@ -132,7 +170,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     String focusedAccessibleTitle() const;
     Component* persistentFocusedComponent() const;
     void restoreFocusAfterRebuild(const String& parameterId, Component* persistentComponent,
-                                  const String& accessibleTitle = {});
+                                  const String& accessibleTitle = {}, const String& preferredSection = {});
     void moveToSection(int direction);
     void showNavigationMenu();
     void showAccessibilitySettingsMenu();
@@ -140,21 +178,29 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void savePatchAsDefault();
     File defaultPatchFile() const;
     void rebuildFocusOrder();
+    void ensurePresetListLoaded();
+    void startPresetListLoad(bool announce, bool forceRefresh = false);
+    void applyPresetList(std::vector<PresetBrowserItem> items, bool announce, int generation);
+    const PresetBrowserItem* presetItemForFile(const File& file) const;
     void refreshPresetList(bool announce = true);
     void populatePresetFilters();
     void filterPresetList();
+    void schedulePresetFilterUpdate(bool rebuildFilters);
     void showPresetMenu();
     void toggleScanDownloads();
     void selectPresetFile(const File& file);
     void loadSelectedPreset();
     void choosePresetFile();
-    void loadPresetFile(const File& file, bool preview = false);
+    void loadPresetFile(const File& file, bool preview = false, bool updateBrowserFilters = false);
     void chooseBankFile();
     void importBankFile(const File& file);
     void chooseFolderToExportBank();
     void exportFolderAsBank(const File& sourceFolder, const File& destinationFile);
     void savePresetToUserDirectory();
     void savePresetAs();
+    void showSavePresetDialog();
+    void hideSavePresetDialog();
+    void commitSavePresetDialog();
     void savePresetFile(const File& file);
     void setPresetControlsVisible(bool visible);
     void updatePresetSummary();
@@ -198,6 +244,8 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void populateEffectChainSelector(ComboBox& selector, Label* summary, const String& sectionName) const;
     void refreshEffectChainControls();
     void moveSelectedEffect(int direction);
+    void rebuildSectionsAfterEffectOrderChange(const String& preferredSection, const String& focusedTitle = {},
+                                               const String& focusedParameter = {});
     void connectModulationAndPromptForAmount(const String& sourceId, const String& destinationId, Component& target);
     void promptForInitialModulationAmount(const String& sourceId, const String& destinationId, bool created, Component& target);
     void promptForParameterValue(const String& parameterId, Component& target);
@@ -209,6 +257,8 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void applyParameterValue();
     void cancelInlineTextPrompt();
     void cancelInitialModulationAmount();
+    PopupMenu createModulationSourceSubmenu(const String& destinationId, std::map<int, String>& choices,
+                                            int firstItemId);
     void showModulationSourceMenuForParameter(const String& destinationId, Component& target);
     ValueBridge* parameterBridge(const String& id) const;
     void setParameterEngineValue(const String& id, float engineValue);
@@ -217,11 +267,14 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     String getNameForRow(int row) override;
     void selectedRowsChanged(int row) override;
     void refreshModulationRoutes();
+    void refreshVisibleModulationLabels();
     void showSelectedModulationParameters();
     void setModulationControlsVisible(bool visible);
     void populateModulationDestinations();
     void updateModulationDestinationList();
     bool isModulationDestinationId(const String& id) const;
+    std::vector<std::pair<String, String>> modulationSourcesForDestination(const String& destinationId) const;
+    void removeModulationFromParameter(const String& sourceId, const String& destinationId, Component& target);
     void setLfoMsegControlsVisible(bool visible);
     void refreshLfoMsegControls();
     void updateLfoPointSelector();
@@ -256,6 +309,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     LineGenerator* activeLfoGenerator() const;
     int selectedLfoPointIndex() const;
     int lfoPointIndexAtPhase(float phase) const;
+    int currentLfoPointIndex() const;
     std::vector<int> selectedLfoPointIndices() const;
     bool isLfoPointSelected(float phase) const;
     void pruneSelectedLfoPointPhases();
@@ -270,12 +324,18 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     String lfoTimeDescription(float phase) const;
     String lfoMsegStatusTextFor(int lfoIndex) const;
     String modulationDestinationsForSource(const String& sourceId) const;
+    String modulationSlotHeaderTitle(int slot) const;
     String modulationSlotTitle(int slot) const;
+    String modulationControlTitle(const String& parameterId) const;
     void announceModulationSummary();
     bool focusShortcutTarget(const KeyPress& key);
     bool focusGroupShortcut(const String& group, const String& fallbackSection = {});
     bool focusSectionShortcut(const String& section);
     bool handleMacroShortcut(const String& parameterId, const KeyPress& key, Component& target);
+    bool handleEffectShortcut(const String& sectionName, const KeyPress& key, Component& target);
+    bool moveEffectInSection(const String& sectionName, const String& effectId, int direction,
+                             const String& focusedTitle);
+    float modulationAmountFromPeakText(const String& destinationId, const String& text) const;
     bool isMacroBipolar(int macroIndex) const;
     void setMacroBipolar(int macroIndex, bool bipolar);
     void refreshWavetableBrowserCache();
@@ -290,12 +350,21 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     ComboBox section_selector_;
     Label preset_summary_;
     TextButton preset_menu_ { "Preset menu" };
-    ComboBox preset_bank_;
-    ComboBox preset_category_;
+    AccessibleComboBox preset_library_;
+    AccessibleComboBox preset_bank_;
+    AccessibleComboBox preset_category_;
     TextEditor preset_search_;
     PresetComboBox preset_selector_;
     ToggleButton preset_preview_ { "Autoload preset when scrolling" };
     TextEditor preset_name_editor_;
+    Label save_patch_prompt_;
+    TextEditor save_patch_name_;
+    TextEditor save_patch_author_;
+    TextEditor save_patch_bank_;
+    TextEditor save_patch_category_;
+    TextEditor save_patch_tags_;
+    TextButton save_patch_ok_ { "Save" };
+    TextButton save_patch_cancel_ { "Cancel" };
     Label wavetable_name_;
     TextButton load_wavetable_ { "Load wavetable" };
     TextButton reset_wavetable_ { "Reset wavetable" };
@@ -328,20 +397,20 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     TextButton modulation_amount_ok_ { "OK" };
     TextButton modulation_amount_cancel_ { "Cancel" };
     Label lfo_mseg_summary_;
-    ComboBox lfo_mseg_lfo_;
-    ComboBox lfo_mseg_mode_;
-    ComboBox lfo_mseg_cycle_;
-    ComboBox lfo_mseg_grid_;
-    ComboBox lfo_mseg_shape_;
+    AccessibleComboBox lfo_mseg_lfo_;
+    AccessibleComboBox lfo_mseg_mode_;
+    AccessibleComboBox lfo_mseg_cycle_;
+    AccessibleComboBox lfo_mseg_grid_;
+    AccessibleComboBox lfo_mseg_shape_;
     TextButton lfo_mseg_apply_shape_ { "Apply shape" };
-    ComboBox lfo_mseg_point_;
+    AccessibleComboBox lfo_mseg_point_;
     TextButton lfo_mseg_add_point_ { "Add point" };
     TextButton lfo_mseg_delete_point_ { "Delete point" };
     TextButton lfo_mseg_time_down_ { "Time earlier" };
     TextButton lfo_mseg_time_up_ { "Time later" };
     TextButton lfo_mseg_value_down_ { "Value down" };
     TextButton lfo_mseg_value_up_ { "Value up" };
-    ComboBox lfo_mseg_curve_;
+    AccessibleComboBox lfo_mseg_curve_;
     ToggleButton lfo_mseg_smooth_ { "Smooth MSEG" };
     LfoMsegKeyboardComponent lfo_mseg_keyboard_;
     Viewport viewport_;
@@ -355,6 +424,9 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     StringArray section_names_;
     Array<File> all_presets_;
     Array<File> filtered_presets_;
+    std::vector<PresetBrowserItem> preset_index_;
+    std::unordered_map<std::string, size_t> preset_index_by_path_;
+    StringArray preset_libraries_;
     StringArray preset_banks_;
     StringArray preset_categories_;
     StringArray modulation_source_ids_;
@@ -396,6 +468,12 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     int lfo_grid_index_ = 14;
     float lfo_cursor_phase_ = 0.0f;
     bool preset_controls_visible_ = false;
+    bool preset_list_loaded_ = false;
+    bool preset_list_loading_ = false;
+    bool preset_filter_update_pending_ = false;
+    bool preset_filter_rebuild_pending_ = false;
+    int preset_list_generation_ = 0;
+    bool save_patch_dialog_visible_ = false;
     bool show_all_sections_ = true;
     bool updating_preset_list_ = false;
     bool updating_navigation_ = false;
@@ -413,6 +491,8 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     bool lfo_multi_selection_mode_ = false;
     bool modulation_amount_prompt_visible_ = false;
     bool parameter_value_prompt_visible_ = false;
+    mutable String pending_effect_chain_section_;
+    mutable int pending_effect_chain_selected_index_ = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SynthEditor)
 };

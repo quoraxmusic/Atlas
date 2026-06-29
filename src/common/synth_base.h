@@ -113,11 +113,13 @@ class SynthBase : public MidiManager::Listener {
     void setAuthor(const String& author);
     void setComments(const String& comments);
     void setStyle(const String& comments);
+    void setTags(const String& tags);
     void setPresetName(const String& preset_name);
     void setMacroName(int index, const String& macro_name);
     String getAuthor();
     String getComments();
     String getStyle();
+    String getTags();
     String getPresetName();
     String getMacroName(int index);
 
