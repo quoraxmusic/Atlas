@@ -46,7 +46,7 @@ Name: "{userdocs}\Alessio Plugins\Atlas\User\LFOs";          Flags: uninsneverun
 Name: "{userdocs}\Alessio Plugins\Atlas\User\FX";            Flags: uninsneveruninstall
 
 [Files]
-Source: "{#BuildDir}\Atlas_artefacts\Release\VST3\Atlas.vst3\*"; DestDir: "{code:GetVST3Dir}\Atlas.vst3"; Flags: recursesubdirs createallsubdirs; Components: vst3
+Source: "{#BuildDir}\Atlas_artefacts\Release\VST3\Atlas.vst3\Contents\x86_64-win\Atlas.vst3"; DestDir: "{code:GetVST3Dir}"; Flags: ignoreversion; Components: vst3
 Source: "{#SourceRoot}\installer\accessible-layout-guide.html"; DestDir: "{userdocs}\Alessio Plugins\Atlas"; DestName: "Accessible Layout Guide.html"; Flags: onlyifdoesntexist
 
 [Code]
