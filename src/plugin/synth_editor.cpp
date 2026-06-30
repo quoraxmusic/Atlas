@@ -1676,6 +1676,28 @@ namespace {
     return readableId(id);
   }
 
+  String midiControlName(int midi_id) {
+    switch (midi_id) {
+      case 1:   return "mod wheel";
+      case 2:   return "breath controller";
+      case 4:   return "foot controller";
+      case 5:   return "portamento time";
+      case 7:   return "channel volume";
+      case 8:   return "balance";
+      case 10:  return "pan";
+      case 11:  return "expression";
+      case 64:  return "sustain pedal";
+      case 65:  return "portamento";
+      case 66:  return "sostenuto pedal";
+      case 67:  return "soft pedal";
+      case 71:  return "resonance";
+      case 74:  return "cutoff";
+      case 91:  return "reverb depth";
+      case 93:  return "chorus depth";
+      default:  return "CC " + String(midi_id);
+    }
+  }
+
   String modulationSourceLabelForId(const String& id) {
     if (id == "mod_wheel") return "Mod wheel";
     if (id == "pitch_wheel") return "Pitch bend";
@@ -10003,4 +10025,10 @@ void SynthEditor::timerCallback() {
 void SynthEditor::updateFullGui() {
   timerCallback();
   synth_.updateHostDisplay();
+}
+
+void SynthEditor::notifyMidiLearned(const std::string& name, int midi_id) {
+  postPluginAnnouncement(modulationDestinationLabelForId(String(name)) + " MIDI learn set to " +
+                             midiControlName(midi_id),
+                         AccessibilityHandler::AnnouncementPriority::high);
 }

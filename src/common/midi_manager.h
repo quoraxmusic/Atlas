@@ -81,6 +81,7 @@ class MidiManager : public MidiInputCallback {
       public:
         virtual ~Listener() { }
         virtual void valueChangedThroughMidi(const std::string& name, vital::mono_float value) = 0;
+        virtual void valueMidiLearned(const std::string& name, int midi_id) { }
         virtual void pitchWheelMidiChanged(vital::mono_float value) = 0;
         virtual void modWheelMidiChanged(vital::mono_float value) = 0;
         virtual void presetChangedThroughMidi(File preset) = 0;

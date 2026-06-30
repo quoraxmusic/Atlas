@@ -96,6 +96,11 @@ void SynthBase::valueChangedThroughMidi(const std::string& name, vital::mono_flo
   callback->post();
 }
 
+void SynthBase::valueMidiLearned(const std::string& name, int midi_id) {
+  MidiLearnedCallback* callback = new MidiLearnedCallback(self_reference_, name, midi_id);
+  callback->post();
+}
+
 void SynthBase::pitchWheelMidiChanged(vital::mono_float value) {
   ValueChangedCallback* callback = new ValueChangedCallback(self_reference_, "pitch_wheel", value);
   callback->post();
@@ -816,5 +821,13 @@ void SynthBase::ValueChangedCallback::messageCallback() {
       if (control_name != "pitch_wheel")
         gui_interface->notifyChange();
     }
+  }
+}
+
+void SynthBase::MidiLearnedCallback::messageCallback() {
+  if (auto synth_base = listener.lock()) {
+    SynthGuiInterface* gui_interface = (*synth_base)->getGuiInterface();
+    if (gui_interface)
+      gui_interface->notifyMidiLearned(control_name, midi_id);
   }
 }

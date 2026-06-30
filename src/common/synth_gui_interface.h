@@ -51,6 +51,7 @@ class SynthGuiInterface {
     SynthBase* getSynth() { return synth_; }
     virtual void updateFullGui();
     virtual void updateGuiControl(const std::string& name, vital::mono_float value);
+    virtual void notifyMidiLearned(const std::string& name, int midi_id) { }
     vital::mono_float getControlValue(const std::string& name);
 
     void notifyModulationsChanged();

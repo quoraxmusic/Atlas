@@ -77,11 +77,15 @@ void MidiManager::clearMidiLearn(const std::string& name) {
 
 void MidiManager::midiInput(int midi_id, vital::mono_float value) {
   if (armed_value_) {
-    midi_learn_map_[midi_id][armed_value_->name] = armed_value_;
+    std::string learned_name = armed_value_->name;
+    midi_learn_map_[midi_id][learned_name] = armed_value_;
     armed_value_ = nullptr;
 
     // TODO: Probably shouldn't write this config on the audio thread.
     LoadSave::saveMidiMapConfig(this);
+
+    if (listener_)
+      listener_->valueMidiLearned(learned_name, midi_id);
   }
 
   if (midi_learn_map_.count(midi_id)) {

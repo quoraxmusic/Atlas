@@ -146,6 +146,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void paint(Graphics&) override;
     void resized() override;
     void updateFullGui() override;
+    void notifyMidiLearned(const std::string& name, int midi_id) override;
     bool keyPressed(const KeyPress& key) override;
     bool keyStateChanged(bool isKeyDown) override;
     std::unique_ptr<ComponentTraverser> createFocusTraverser() override;

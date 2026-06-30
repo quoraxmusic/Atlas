@@ -50,6 +50,7 @@ class SynthBase : public MidiManager::Listener {
 
     void valueChanged(const std::string& name, vital::mono_float value);
     void valueChangedThroughMidi(const std::string& name, vital::mono_float value) override;
+    void valueMidiLearned(const std::string& name, int midi_id) override;
     void pitchWheelMidiChanged(vital::mono_float value) override;
     void modWheelMidiChanged(vital::mono_float value) override;
     void pitchWheelGuiChanged(vital::mono_float value);
@@ -145,6 +146,17 @@ class SynthBase : public MidiManager::Listener {
       std::weak_ptr<SynthBase*> listener;
       std::string control_name;
       vital::mono_float value;
+    };
+
+    struct MidiLearnedCallback : public CallbackMessage {
+      MidiLearnedCallback(std::shared_ptr<SynthBase*> listener, std::string name, int midi) :
+          listener(listener), control_name(std::move(name)), midi_id(midi) { }
+
+      void messageCallback() override;
+
+      std::weak_ptr<SynthBase*> listener;
+      std::string control_name;
+      int midi_id;
     };
 
   protected:
