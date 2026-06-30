@@ -9884,8 +9884,8 @@ bool SynthEditor::focusShortcutTarget(const KeyPress& key) {
     if (key.getKeyCode() == '3') return focusGroupShortcut("Bus 3");
   }
 
-  if (modifiers.isAltDown() && !modifiers.isCommandDown() && !modifiers.isCtrlDown() && character == 'm')
-    return focusGroupShortcut("Modulation", "Modulation routing");
+  // if (modifiers.isAltDown() && !modifiers.isCommandDown() && !modifiers.isCtrlDown() && character == 'm')
+  //   return focusGroupShortcut("Modulation", "Modulation routing");
 
   if (modifiers.isAnyModifierKeyDown())
     return false;
@@ -9896,6 +9896,7 @@ bool SynthEditor::focusShortcutTarget(const KeyPress& key) {
     case 'f': return focusGroupShortcut("Filters");
     case 'e': return focusGroupShortcut("Envelopes");
     case 'l': return focusGroupShortcut("LFOs");
+    case 'm': return focusSectionShortcut("Modulation routing");
     case 'p': return focusGroupShortcut("Effects", kEffectsChainSection);
     case 'r': return focusSectionShortcut(kSignalRoutingSection);
     case 'z': return focusGroupShortcut("Zones");
