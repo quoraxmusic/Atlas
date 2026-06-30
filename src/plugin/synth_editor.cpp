@@ -9804,11 +9804,122 @@ bool SynthEditor::focusShortcutTarget(const KeyPress& key) {
   return false;
 }
 
+namespace {
+  // Surge-style single-octave QWERTY layout: keyboard key code -> semitone offset from the
+  // base note. Letters use their uppercase ASCII code (matching KeyPress::isKeyCurrentlyDown);
+  // the four punctuation keys extend the top of the range.
+  struct QwertyKeyMapping {
+    int key_code;
+    int offset;
+  };
+
+  const QwertyKeyMapping kQwertyKeys[] = {
+    { 'A', 0 },  { 'W', 1 },  { 'S', 2 },  { 'E', 3 },  { 'D', 4 },  { 'F', 5 },
+    { 'T', 6 },  { 'G', 7 },  { 'Y', 8 },  { 'H', 9 },  { 'U', 10 }, { 'J', 11 },
+    { 'K', 12 }, { 'O', 13 }, { 'L', 14 }, { 'P', 15 },
+    { ';', 16 }, { '[', 17 }, { '\'', 18 }, { ']', 19 },
+  };
+
+  bool isQwertyNoteKeyCode(int key_code) {
+    for (const QwertyKeyMapping& mapping : kQwertyKeys) {
+      if (mapping.key_code == key_code)
+        return true;
+    }
+    return false;
+  }
+} // namespace
+
+bool SynthEditor::isQwertyKeyboardActive() const {
+  return qwerty_keyboard_on_ &&
+         dynamic_cast<TextEditor*>(Component::getCurrentlyFocusedComponent()) == nullptr;
+}
+
+void SynthEditor::toggleQwertyKeyboard() {
+  qwerty_keyboard_on_ = !qwerty_keyboard_on_;
+  if (!qwerty_keyboard_on_)
+    allQwertyNotesOff();
+  postPluginAnnouncement(qwerty_keyboard_on_ ? "QWERTY keyboard on" : "QWERTY keyboard off",
+                         AccessibilityHandler::AnnouncementPriority::high);
+}
+
+void SynthEditor::updateQwertyNotes() {
+  MidiKeyboardState* state = getSynth()->getKeyboardState();
+  if (state == nullptr)
+    return;
+
+  const float velocity = qwerty_velocity_ / 127.0f;
+  for (const QwertyKeyMapping& mapping : kQwertyKeys) {
+    const int note = 12 * qwerty_octave_ + mapping.offset;
+    if (note < 0 || note > 127)
+      continue;
+
+    const bool key_down = KeyPress::isKeyCurrentlyDown(mapping.key_code);
+    const bool tracked = qwerty_notes_down_.count(note) != 0;
+    if (key_down && !tracked) {
+      state->noteOn(1, note, velocity);
+      qwerty_notes_down_.insert(note);
+    }
+    else if (!key_down && tracked) {
+      state->noteOff(1, note, 0.0f);
+      qwerty_notes_down_.erase(note);
+    }
+  }
+}
+
+void SynthEditor::allQwertyNotesOff() {
+  MidiKeyboardState* state = getSynth()->getKeyboardState();
+  if (state != nullptr) {
+    for (int note : qwerty_notes_down_)
+      state->noteOff(1, note, 0.0f);
+  }
+  qwerty_notes_down_.clear();
+}
+
+bool SynthEditor::keyStateChanged(bool isKeyDown) {
+  if (!isQwertyKeyboardActive())
+    return false;
+
+  updateQwertyNotes();
+  return true;
+}
+
 bool SynthEditor::keyPressed(const KeyPress& key) {
   if ((modulation_amount_prompt_visible_ || parameter_value_prompt_visible_) &&
       key.getKeyCode() == KeyPress::escapeKey) {
     cancelInlineTextPrompt();
     return true;
+  }
+  {
+    const ModifierKeys modifiers = key.getModifiers();
+    if (modifiers.isAltDown() && !modifiers.isCommandDown() && !modifiers.isCtrlDown() &&
+        key.getKeyCode() == 'K') {
+      toggleQwertyKeyboard();
+      return true;
+    }
+  }
+  if (isQwertyKeyboardActive()) {
+    const ModifierKeys modifiers = key.getModifiers();
+    const int code = key.getKeyCode();
+    if (code == 'X' || code == 'C') {
+      allQwertyNotesOff();
+      qwerty_octave_ = jlimit(0, 9, qwerty_octave_ + (code == 'C' ? 1 : -1));
+      postPluginAnnouncement("Octave " + String(qwerty_octave_),
+                             AccessibilityHandler::AnnouncementPriority::high);
+      return true;
+    }
+    if (code == 'V' || code == 'B') {
+      int step = modifiers.isShiftDown() ? 1 : 10;
+      if (code == 'V')
+        step = -step;
+      qwerty_velocity_ = jlimit(1, 127, qwerty_velocity_ + step);
+      postPluginAnnouncement("Velocity " + String(qwerty_velocity_),
+                             AccessibilityHandler::AnnouncementPriority::high);
+      return true;
+    }
+    // Consume mapped note keys so single-letter navigation is suppressed; the note on/off
+    // itself is generated in keyStateChanged.
+    if (isQwertyNoteKeyCode(code))
+      return true;
   }
   if ((key.getKeyCode() == KeyPress::returnKey || key.getKeyCode() == KeyPress::spaceKey) &&
       preset_controls_visible_ && preset_selector_.hasKeyboardFocus(true)) {
@@ -9817,7 +9928,7 @@ bool SynthEditor::keyPressed(const KeyPress& key) {
   }
   if (lfo_mseg_controls_visible_ && handleLfoMsegShortcut(key))
     return true;
-  if (focusShortcutTarget(key))
+  if (!isQwertyKeyboardActive() && focusShortcutTarget(key))
     return true;
   if (key.getModifiers().isShiftDown() &&
       CharacterFunctions::toLowerCase(key.getTextCharacter()) == 'm') {
@@ -9834,13 +9945,15 @@ bool SynthEditor::keyPressed(const KeyPress& key) {
       return true;
     }
   }
-  if (key.getTextCharacter() == ',') {
-    moveToSection(-1);
-    return true;
-  }
-  if (key.getTextCharacter() == '.') {
-    moveToSection(1);
-    return true;
+  if (!isQwertyKeyboardActive()) {
+    if (key.getTextCharacter() == ',') {
+      moveToSection(-1);
+      return true;
+    }
+    if (key.getTextCharacter() == '.') {
+      moveToSection(1);
+      return true;
+    }
   }
   return AudioProcessorEditor::keyPressed(key);
 }

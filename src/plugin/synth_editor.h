@@ -21,6 +21,7 @@
 #include "synth_gui_interface.h"
 
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -146,6 +147,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void resized() override;
     void updateFullGui() override;
     bool keyPressed(const KeyPress& key) override;
+    bool keyStateChanged(bool isKeyDown) override;
     std::unique_ptr<ComponentTraverser> createFocusTraverser() override;
     std::unique_ptr<ComponentTraverser> createKeyboardFocusTraverser() override;
 
@@ -329,6 +331,10 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     String modulationControlTitle(const String& parameterId) const;
     void announceModulationSummary();
     bool focusShortcutTarget(const KeyPress& key);
+    void toggleQwertyKeyboard();
+    void updateQwertyNotes();
+    void allQwertyNotesOff();
+    bool isQwertyKeyboardActive() const;
     bool focusGroupShortcut(const String& group, const String& fallbackSection = {});
     bool focusSectionShortcut(const String& section);
     bool handleMacroShortcut(const String& parameterId, const KeyPress& key, Component& target);
@@ -491,6 +497,10 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     bool lfo_multi_selection_mode_ = false;
     bool modulation_amount_prompt_visible_ = false;
     bool parameter_value_prompt_visible_ = false;
+    bool qwerty_keyboard_on_ = false;
+    int qwerty_octave_ = 5;
+    int qwerty_velocity_ = 127;
+    std::set<int> qwerty_notes_down_;
     mutable String pending_effect_chain_section_;
     mutable int pending_effect_chain_selected_index_ = -1;
 
