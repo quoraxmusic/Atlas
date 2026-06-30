@@ -295,7 +295,7 @@ void SynthSlider::mouseDrag(const MouseEvent& e) {
   else
     setDefaultRange();
     
-  sensitive_mode_ = e.mods.isCommandDown();
+  sensitive_mode_ = e.mods.isShiftDown() && !shift_index_amount_;
   if (sensitive_mode_)
     multiply *= kSlowDragMultiplier;
 
@@ -359,6 +359,7 @@ void SynthSlider::mouseDoubleClick(const MouseEvent& e) {
 void SynthSlider::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& wheel) {
   double interval = getInterval();
   if (scroll_enabled_ && !wheel.isSmooth && getInterval() > 0) {
+    double movement = mouse_wheel_index_movement_;
     if (shift_index_amount_ && e.mods.isShiftDown()) {
       interval = shift_index_amount_;
       if (shift_is_multiplicative_) {
@@ -368,11 +369,13 @@ void SynthSlider::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& w
           setValue(getValue() / std::max(1.0, (interval * mouse_wheel_index_movement_)));
       }
     }
+    else if (e.mods.isShiftDown())
+      movement *= kSlowDragMultiplier;
 
     if (wheel.deltaY > 0.0f)
-      setValue(getValue() + interval * mouse_wheel_index_movement_);
+      setValue(getValue() + interval * movement);
     else
-      setValue(getValue() - interval * mouse_wheel_index_movement_);
+      setValue(getValue() - interval * movement);
   }
   else
     OpenGlSlider::mouseWheelMove(e, wheel);

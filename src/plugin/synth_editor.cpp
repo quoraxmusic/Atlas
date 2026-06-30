@@ -2751,9 +2751,18 @@ namespace {
           return Slider::keyPressed(key);
 
         const double range = getMaximum() - getMinimum();
-        const double interval = getInterval() > 0.0 ? getInterval() : range / 100.0;
-        const double multiplier = (key.getKeyCode() == KeyPress::pageUpKey ||
-                                   key.getKeyCode() == KeyPress::pageDownKey) ? 10.0 : 1.0;
+        const bool continuous = getInterval() <= 0.0;
+        const double interval = continuous ? range / 100.0 : getInterval();
+        const bool page = key.getKeyCode() == KeyPress::pageUpKey ||
+                          key.getKeyCode() == KeyPress::pageDownKey;
+        // Mirror of SynthSlider::kSlowDragMultiplier: Shift gives a 1/10 step. Only meaningful on
+        // continuous params, where the interval is an arbitrary fallback rather than a real step.
+        constexpr double kFineMultiplier = 0.1;
+        double multiplier = 1.0;
+        if (page)
+          multiplier = 10.0;
+        else if (continuous && key.getModifiers().isShiftDown())
+          multiplier = kFineMultiplier;
         const double delta = interval * multiplier * (increase ? 1.0 : -1.0);
         Slider::ScopedDragNotification drag(*this);
         setValue(jlimit(getMinimum(), getMaximum(), getValue() + delta), sendNotificationSync);
@@ -2918,7 +2927,7 @@ class AccessibleParameterRow : public Component {
         slider_.setDescription(parameter_description);
         slider_.setTooltip(parameter_description);
         slider_.setHelpText(random_rate ? "In free mode this controls how long each random cycle lasts. In synced mode use Tempo."
-                                        : "Use arrows for changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default. Press Shift M, the right bracket key, or VoiceOver Shift M for the context menu. Press Shift L for MIDI learn, and Shift C to clear MIDI learn.");
+                                        : "Use arrows for changes, hold Shift with the arrows for finer changes, Page Up and Page Down for larger changes, Enter to type a value, Backspace to reset to default. Press Shift M, the right bracket key, or VoiceOver Shift M for the context menu. Press Shift L for MIDI learn, and Shift C to clear MIDI learn.");
         slider_.setWantsKeyboardFocus(true);
         slider_.textFromValueFunction = [this](double value) {
           if (text_from_value_)
