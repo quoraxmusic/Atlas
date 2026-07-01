@@ -5862,6 +5862,7 @@ void SynthEditor::showNavigationMenu() {
     menu.addItem(7, "Clear tuning: " + String(synth_.getTuning()->getName()));
   menu.addSeparator();
   menu.addItem(4, "Accessibility settings");
+  menu.addItem(8, "Keyboard help");
 
   menu.showMenuAsync(PopupMenu::Options().withTargetComponent(menu_button_),
                      [this](int result) {
@@ -5879,6 +5880,8 @@ void SynthEditor::showNavigationMenu() {
       clearTuning();
     else if (result == 4)
       showAccessibilitySettingsMenu();
+    else if (result == 8)
+      showKeyboardHelp();
   });
 }
 
@@ -5938,6 +5941,179 @@ void SynthEditor::showAccessibilitySettingsMenu() {
   opts.componentToCentreAround = this;
   opts.useNativeTitleBar = true;
   opts.resizable = false;
+  opts.escapeKeyTriggersCloseButton = true;
+  auto* dlg = opts.launchAsync();
+  if (dlg) {
+    Component::SafePointer<DialogWindow> safe_dlg(dlg);
+    MessageManager::callAsync([safe_dlg]() {
+      if (safe_dlg && safe_dlg->getContentComponent()) {
+        if (auto* first = safe_dlg->getContentComponent()->getChildComponent(0))
+          first->grabKeyboardFocus();
+      }
+    });
+  }
+}
+
+void SynthEditor::showKeyboardHelp() {
+  // NOTE: This text is the single source of on-screen keyboard help. Whenever a keyboard shortcut
+  // is added or changed anywhere in the plugin (focusShortcutTarget, OffscreenSlider::keyPressed,
+  // SynthEditor::keyPressed, handleLfoMsegShortcut, handleMacroShortcut, and the preset/popup
+  // browser keyPressed overrides), add or update its entry below under the matching group.
+  static const char* const kHelpText =
+      "ATLAS keyboard shortcuts\n"
+      "\n"
+      "Most single-letter shortcuts work when a parameter or the editor has focus, but not while a "
+      "text field is focused.\n"
+      "\n"
+      "Section navigation\n"
+      "  O - Oscillators\n"
+      "  X - Mixer and routing\n"
+      "  F - Filters\n"
+      "  E - Envelopes\n"
+      "  L - LFOs\n"
+      "  M - Modulation routing\n"
+      "  P - Effects\n"
+      "  R - Signal routing\n"
+      "  Z - Zones\n"
+      "  G - Master and global\n"
+      "  Ctrl+1 / Ctrl+2 / Ctrl+3 - Jump to Bus 1 / 2 / 3\n"
+      "  1 to 9 - Jump to subsection within the current group\n"
+      "  Comma ( , ) - Previous section\n"
+      "  Period ( . ) - Next section\n"
+      "\n"
+      "Adjusting a parameter (when a slider has focus)\n"
+      "  Up / Right / Page Up - Increase value\n"
+      "  Down / Left / Page Down - Decrease value\n"
+      "  Shift + arrow - Fine adjustment\n"
+      "  Page Up / Page Down - Larger adjustment\n"
+      "  Home - Maximum value\n"
+      "  End - Minimum value\n"
+      "  Enter - Type a value\n"
+      "  Backspace / Delete - Reset to default\n"
+      "  Right bracket ( ] ) or Shift+M - Open context menu\n"
+      "  Shift+L - MIDI learn\n"
+      "  Shift+C - Clear MIDI learn\n"
+      "\n"
+      "QWERTY musical keyboard\n"
+      "  Alt+K - Toggle the computer-keyboard piano on or off\n"
+      "  While active:\n"
+      "    C - Octave up\n"
+      "    X - Octave down\n"
+      "    B - Velocity up (Shift for +1)\n"
+      "    V - Velocity down (Shift for -1)\n"
+      "    Note keys: A W S E D F T G Y H U J K O L P ; [ ' ]\n"
+      "\n"
+      "Macros (when a macro has focus)\n"
+      "  Shift+Enter - Rename macro\n"
+      "  B - Toggle unipolar / bipolar\n"
+      "\n"
+      "Effects chain (when an effect has focus)\n"
+      "  Left bracket ( [ ) - Move effect earlier in the chain\n"
+      "  Right bracket ( ] ) - Move effect later in the chain\n"
+      "\n"
+      "LFO segment (MSEG) editor\n"
+      "  Shift+1 to Shift+8 - Select LFO 1 to 8\n"
+      "  Left / Right - Move cursor in time\n"
+      "  Shift + Left / Right - Move selected point in time\n"
+      "  Comma ( , ) / Period ( . ) - Previous / next point\n"
+      "  Up / Down - Change point value by 1% (Shift for 5%)\n"
+      "  Left bracket ( [ ) / Right bracket ( ] ) - Change value by 1% (Shift for 5%)\n"
+      "  A - Add point at cursor\n"
+      "  S - Toggle point selection\n"
+      "  Shift+S - Toggle multi-selection mode\n"
+      "  R - Clear all selections\n"
+      "  E or Delete - Delete point at cursor\n"
+      "  I / K - Cycle curve type up / down\n"
+      "  Cmd + Up / Down - Cycle curve type up / down\n"
+      "  J / L - Move point in time left / right\n"
+      "  G / H - Cycle shape presets backward / forward\n"
+      "  Shift+A - Apply selected shape preset\n"
+      "  Semicolon ( ; ) / Apostrophe ( ' ) - Cycle LFO cycle length\n"
+      "  Minus ( - ) / Equals ( = ) - Make grid coarser / finer\n"
+      "  C / V - Copy / paste selected points\n"
+      "  Shift+C / Shift+V - Copy / paste the whole shape\n"
+      "  Shift+D - Duplicate shape to the next LFO\n"
+      "  Backspace - Clear the LFO shape\n"
+      "\n"
+      "Presets and browsers\n"
+      "  Enter or Space - Load the selected preset (preset selector focused)\n"
+      "  Up / Left - Previous item or preset\n"
+      "  Down / Right - Next item or preset\n"
+      "  Esc - Close the browser\n"
+      "\n"
+      "This dialog\n"
+      "  Tab - Move to the Close button\n"
+      "  Enter (on Close) or Esc - Close this dialog\n";
+
+  class DialogContent : public Component, public TextEditor::Listener {
+  public:
+    DialogContent() {
+      text_.setMultiLine(true, true);
+      // Editable (not read-only) on purpose: a read-only JUCE TextEditor is exposed to the OS
+      // accessibility layer as static text with no navigable caret, so screen readers re-read the
+      // same line on every arrow press. An editable field exposes a movable caret and gives proper
+      // line/word/character navigation. This mirrors the Airwindows Consolidated documentation
+      // viewer's fix; edits are harmless since the text is reset on every open and discarded on
+      // close. See the keyboard-help-dialog memory.
+      text_.setReadOnly(false);
+      text_.setScrollbarsShown(true);
+      text_.setCaretVisible(true);
+      text_.setAccessible(true);
+      text_.setTabKeyUsedAsCharacter(false);
+      text_.setWantsKeyboardFocus(true);
+      text_.setExplicitFocusOrder(1);
+      text_.setTitle("Keyboard shortcuts");
+      text_.setText(kHelpText, dontSendNotification);
+      // The editable TextEditor swallows Escape, so it never reaches the DialogWindow's
+      // escapeKeyTriggersCloseButton. Catch it here and close ourselves.
+      text_.addListener(this);
+      addAndMakeVisible(text_);
+
+      close_.setWantsKeyboardFocus(true);
+      close_.setExplicitFocusOrder(2);
+      close_.setTitle("Close");
+      close_.onClick = [this] { closeDialog(); };
+      addAndMakeVisible(close_);
+
+      setSize(520, 560);
+    }
+
+    void resized() override {
+      const int margin = 8;
+      const int button_height = 28;
+      const int button_width = 100;
+      text_.setBounds(margin, margin, getWidth() - 2 * margin,
+                      getHeight() - button_height - 3 * margin);
+      close_.setBounds((getWidth() - button_width) / 2,
+                       getHeight() - button_height - margin, button_width, button_height);
+    }
+
+    bool keyPressed(const KeyPress& key) override {
+      if (key.getKeyCode() == KeyPress::returnKey && close_.hasKeyboardFocus(false)) {
+        closeDialog();
+        return true;
+      }
+      return Component::keyPressed(key);
+    }
+
+    void textEditorEscapeKeyPressed(TextEditor&) override { closeDialog(); }
+
+  private:
+    void closeDialog() {
+      if (auto* dw = findParentComponentOfClass<DialogWindow>())
+        dw->exitModalState(0);
+    }
+
+    TextEditor text_;
+    TextButton close_{"Close"};
+  };
+
+  DialogWindow::LaunchOptions opts;
+  opts.dialogTitle = "Keyboard help";
+  opts.content.setOwned(new DialogContent());
+  opts.componentToCentreAround = this;
+  opts.useNativeTitleBar = true;
+  opts.resizable = true;
   opts.escapeKeyTriggersCloseButton = true;
   auto* dlg = opts.launchAsync();
   if (dlg) {

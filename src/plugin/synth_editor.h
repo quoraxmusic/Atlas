@@ -181,6 +181,7 @@ class SynthEditor : public AudioProcessorEditor, public SynthGuiInterface,
     void moveToSection(int direction);
     void showNavigationMenu();
     void showAccessibilitySettingsMenu();
+    void showKeyboardHelp();
     void initializePatch();
     void savePatchAsDefault();
     File defaultPatchFile() const;
